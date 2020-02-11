@@ -52,6 +52,9 @@ implementation{
       if(len==sizeof(pack)){
          pack* myMsg=(pack*) payload;
          dbg(GENERAL_CHANNEL, "Package Payload: %s\n", myMsg->payload);
+         if (myMsg->protocol == PROTOCOL_BROADCAST) {
+            signal CommandHandler.broadcast(myMsg->payload);
+         }
          return msg;
       }
       dbg(GENERAL_CHANNEL, "Unknown Packet Type %d\n", len);
