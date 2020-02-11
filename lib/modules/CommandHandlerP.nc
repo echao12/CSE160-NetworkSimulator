@@ -78,6 +78,11 @@ implementation{
                 signal CommandHandler.setTestServer();
                 break;
 
+            case CMD_BROADCAST:
+                dbg(COMMAND_CHANNEL, "Command Type: Broadcast\n");
+                signal CommandHandler.broadcast(&buff[0]);
+                break;
+
             default:
                 dbg(COMMAND_CHANNEL, "CMD_ERROR: \"%d\" does not match any known commands.\n", msg->id);
                 break;
