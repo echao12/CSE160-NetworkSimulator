@@ -54,13 +54,28 @@ implementation{
    event void AMControl.stopDone(error_t err){}
 
    event message_t* Receive.receive(message_t* msg, void* payload, uint8_t len){
+      uint32_t* keys;
+      uint16_t i;
       dbg(GENERAL_CHANNEL, "Packet Received\n");
       if(len==sizeof(pack)){
          pack* myMsg=(pack*) payload;
          dbg(GENERAL_CHANNEL, "Package Payload: %s\n", myMsg->payload);
          //add neighbor id to hashmap
          //check for new neighbor
-         if(neighborMap.contains()){
+
+         if(!call neighborMap.contains(myMsg->src)){
+            call neighborMap.insert(myMsg->src, 1);
+            keys = call neighborMap.getKeys();
+            // uint16_t i;
+            dbg(GENERAL_CHANNEL, "\nCurrent nodeId: %hhu\n\n", TOS_NODE_ID);
+            dbg(GENERAL_CHANNEL, "Neighbor nodeIDs:\n");
+            //uint32_t* keys;
+
+             for(i = 0; i < call neighborMap.size(); i++){
+                dbg(GENERAL_CHANNEL, "%hhu\n", keys[i]);
+             }
+            dbg(GENERAL_CHANNEL, "\n*End nodeIDs*\n");
+         }
 
          // If it's a flooding packet, continue the flood
          if (myMsg->protocol == PROTOCOL_FLOOD) {
