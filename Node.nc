@@ -23,7 +23,7 @@ module Node{
 
    uses interface CommandHandler;
    
-   uses interface hashmap<uint16_t> as neighborMap;
+   uses interface Hashmap<uint16_t> as neighborMap;
 
    uses interface List<uint16_t> as CacheSrc;
    uses interface List<uint16_t> as CacheSeq;
@@ -58,7 +58,11 @@ implementation{
       if(len==sizeof(pack)){
          pack* myMsg=(pack*) payload;
          dbg(GENERAL_CHANNEL, "Package Payload: %s\n", myMsg->payload);
+         //add neighbor id to hashmap
+         //check for new neighbor
+         if(neighborMap.contains()){
 
+         }
          // Check for duplicate packet
          if (checkCache(myMsg)) {
             // If it's a duplicate packet, ignore it
