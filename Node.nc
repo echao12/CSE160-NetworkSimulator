@@ -66,16 +66,17 @@ implementation{
          //check for new neighbor
          if(!call neighborMap.contains(myMsg->src)){
             call neighborMap.insert(myMsg->src, 1);
-            keys = call neighborMap.getKeys();
+           /* keys = call neighborMap.getKeys();
             // uint16_t i;
-            dbg(NEIGHBOR_CHANNEL, "\nCurrent nodeId: %hhu\n\n", TOS_NODE_ID);
-            dbg(NEIGHBOR_CHANNEL, "Neighbor nodeIDs:\n");
+            //dbg(NEIGHBOR_CHANNEL, "\nCurrent nodeId: %hhu\n\n", TOS_NODE_ID);
+            //dbg(NEIGHBOR_CHANNEL, "Neighbor nodeIDs:\n");
             //uint32_t* keys;
 
             for(i = 0; i < call neighborMap.size(); i++){
                dbg(NEIGHBOR_CHANNEL, "%hhu\n", keys[i]);
             }
             dbg(NEIGHBOR_CHANNEL, "\n*End nodeIDs*\n");
+            */
          }
          
          //ping reply
@@ -135,7 +136,20 @@ implementation{
       call Sender.send(sendPackage, AM_BROADCAST_ADDR);
    }
 
-   event void CommandHandler.printNeighbors(){}
+   event void CommandHandler.printNeighbors(){
+      uint32_t* keys;
+      uint16_t i;
+
+      keys = call neighborMap.getKeys();
+
+      dbg(NEIGHBOR_CHANNEL, "\nCurrent nodeId: %hhu\n\n", TOS_NODE_ID);
+      dbg(NEIGHBOR_CHANNEL, "Neighbor nodeIDs:\n");
+
+      for(i = 0; i < call neighborMap.size(); i++){
+         dbg(NEIGHBOR_CHANNEL, "%hhu\n", keys[i]);
+      }
+      dbg(NEIGHBOR_CHANNEL, "\n*End nodeIDs*\n");
+   }
 
    event void CommandHandler.printRouteTable(){}
 
