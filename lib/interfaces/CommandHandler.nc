@@ -1,6 +1,7 @@
 interface CommandHandler{
    // Events
    event void ping(uint16_t destination, uint8_t *payload);
+   event void pingReply(uint16_t destination);
    event void broadcast(uint16_t destination, uint8_t *payload);
    event void flood(uint16_t destination, uint8_t *payload);
    event void printNeighbors();

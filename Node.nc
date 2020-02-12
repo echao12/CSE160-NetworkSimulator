@@ -56,25 +56,32 @@ implementation{
    event message_t* Receive.receive(message_t* msg, void* payload, uint8_t len){
       uint32_t* keys;
       uint16_t i;
+
       dbg(GENERAL_CHANNEL, "Packet Received\n");
       if(len==sizeof(pack)){
          pack* myMsg=(pack*) payload;
          dbg(GENERAL_CHANNEL, "Package Payload: %s\n", myMsg->payload);
+
          //add neighbor id to hashmap
          //check for new neighbor
-
          if(!call neighborMap.contains(myMsg->src)){
             call neighborMap.insert(myMsg->src, 1);
             keys = call neighborMap.getKeys();
             // uint16_t i;
-            dbg(GENERAL_CHANNEL, "\nCurrent nodeId: %hhu\n\n", TOS_NODE_ID);
-            dbg(GENERAL_CHANNEL, "Neighbor nodeIDs:\n");
+            dbg(NEIGHBOR_CHANNEL, "\nCurrent nodeId: %hhu\n\n", TOS_NODE_ID);
+            dbg(NEIGHBOR_CHANNEL, "Neighbor nodeIDs:\n");
             //uint32_t* keys;
 
-             for(i = 0; i < call neighborMap.size(); i++){
-                dbg(GENERAL_CHANNEL, "%hhu\n", keys[i]);
-             }
-            dbg(GENERAL_CHANNEL, "\n*End nodeIDs*\n");
+            for(i = 0; i < call neighborMap.size(); i++){
+               dbg(NEIGHBOR_CHANNEL, "%hhu\n", keys[i]);
+            }
+            dbg(NEIGHBOR_CHANNEL, "\n*End nodeIDs*\n");
+         }
+         
+         //ping reply
+         if(myMsg->protocol == PROTOCOL_PING){
+            //send acknowledgement reply
+            signal CommandHandler.pingReply(myMsg->src);
          }
 
          // If it's a flooding packet, continue the flood
@@ -107,6 +114,12 @@ implementation{
    event void CommandHandler.ping(uint16_t destination, uint8_t *payload){
       dbg(GENERAL_CHANNEL, "PING EVENT \n");
       makePack(&sendPackage, TOS_NODE_ID, destination, 0, PROTOCOL_PING, 0, payload, PACKET_MAX_PAYLOAD_SIZE);
+      call Sender.send(sendPackage, destination);
+   }
+
+   event void CommandHandler.pingReply(uint16_t destination){
+      dbg(GENERAL_CHANNEL, "PING EVENT \n");
+      makePack(&sendPackage, TOS_NODE_ID, destination, 0, PROTOCOL_PINGREPLY, 0, "ACK", PACKET_MAX_PAYLOAD_SIZE);
       call Sender.send(sendPackage, destination);
    }
 
