@@ -12,7 +12,9 @@ class TestSim:
     # COMMAND TYPES
     CMD_PING = 0
     CMD_NEIGHBOR_DUMP = 1
-    CMD_ROUTE_DUMP=3
+    CMD_ROUTE_DUMP = 3
+    CMD_BROADCAST = 7
+    CMD_FLOOD = 8
 
     # CHANNELS - see includes/channels.h
     COMMAND_CHANNEL="command";
@@ -118,6 +120,12 @@ class TestSim:
 
     def ping(self, source, dest, msg):
         self.sendCMD(self.CMD_PING, source, "{0}{1}".format(chr(dest),msg));
+
+    def broadcast(self, source, dest, msg):
+        self.sendCMD(self.CMD_BROADCAST, source, "{0}{1}".format(chr(dest),msg));
+
+    def flood(self, source, dest, msg):
+        self.sendCMD(self.CMD_FLOOD, source, "{0}{1}".format(chr(dest),msg));
 
     def neighborDMP(self, destination):
         self.sendCMD(self.CMD_NEIGHBOR_DUMP, destination, "neighbor command");
