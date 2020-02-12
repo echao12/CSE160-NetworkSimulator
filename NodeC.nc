@@ -31,9 +31,9 @@ implementation {
     components CommandHandlerC;
     Node.CommandHandler -> CommandHandlerC;
 
-    components new HashmapC(uint16_t, MAX_NEIGHBORS_SIZE) as hmap;//25 nodes to track
+    components new HashmapC(uint16_t, MAX_NEIGHBORS_SIZE) as hmap;
     Node.neighborMap -> hmap;
-    
+
     components new ListC(uint16_t, MAX_CACHE_SIZE) as CacheSrcListC;
     components new ListC(uint16_t, MAX_CACHE_SIZE) as CacheSeqListC;
     Node.CacheSrc -> CacheSrcListC;

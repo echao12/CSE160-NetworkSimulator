@@ -6,7 +6,7 @@ def main():
     s.runTime(10)
 
     # Load the network
-    s.loadTopo("linear_loop.topo")
+    s.loadTopo("star.topo")
     
     # Add noise
     s.loadNoise("no_noise.txt")
@@ -20,8 +20,9 @@ def main():
     s.addChannel(s.FLOODING_CHANNEL)
     s.addChannel(s.NEIGHBOR_CHANNEL)
 
-    # Flood the network to find neighbors
     s.runTime(20)
+
+    # Flood the network to find neighbors
     s.flood(1, 2, "FLOOD")
     s.runTime(10)
     
