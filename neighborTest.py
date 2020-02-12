@@ -23,7 +23,7 @@ def main():
     s.runTime(20)
 
     # Flood the network to find neighbors
-    s.flood(1, 2, "FLOOD")
+    s.flood(1, 2, "Hello there")
     s.runTime(10)
     
     # Print neighbors

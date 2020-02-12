@@ -25,8 +25,7 @@ module Node{
    
    uses interface Hashmap<uint16_t> as neighborMap;
 
-   uses interface List<uint16_t> as CacheSrc;
-   uses interface List<uint16_t> as CacheSeq;
+   uses interface List<pack*> as Cache;
 }
 
 implementation{
@@ -67,17 +66,6 @@ implementation{
          if(!call neighborMap.contains(myMsg->src)){
             call neighborMap.insert(myMsg->src, 1);
             dbg(NEIGHBOR_CHANNEL, "Inserted: %hhu\n", myMsg->src);
-           /* keys = call neighborMap.getKeys();
-            // uint16_t i;
-            //dbg(NEIGHBOR_CHANNEL, "\nCurrent nodeId: %hhu\n\n", TOS_NODE_ID);
-            //dbg(NEIGHBOR_CHANNEL, "Neighbor nodeIDs:\n");
-            //uint32_t* keys;
-
-            for(i = 0; i < call neighborMap.size(); i++){
-               dbg(NEIGHBOR_CHANNEL, "%hhu\n", keys[i]);
-            }
-            dbg(NEIGHBOR_CHANNEL, "\n*End nodeIDs*\n");
-            */
          }
          
          //ping reply
@@ -91,17 +79,16 @@ implementation{
             // Check for duplicate packet first
             if (checkCache(myMsg)) {
                // If it's a duplicate packet, ignore it
-               dbg(GENERAL_CHANNEL, "Packet is a duplicate.\n");
+               dbg(FLOODING_CHANNEL, "Packet is a duplicate.\n");
                return msg;
             }
 
             // Add packet to cache
-            if (call CacheSrc.isFull()) {
-               call CacheSrc.popfront();
-               call CacheSeq.popfront();
+            if (call Cache.isFull()) {
+               // If the cache is already full, delete the oldest data
+               call Cache.popfront();
             }
-            call CacheSrc.pushback(myMsg->src);
-            call CacheSeq.pushback(myMsg->seq);
+            call Cache.pushback(myMsg);
 
             // Propagate the signal
             signal CommandHandler.flood(myMsg->dest, myMsg->payload);
@@ -175,13 +162,10 @@ implementation{
    }
 
    bool checkCache(pack *Package) {
-      uint16_t cacheSize = call CacheSrc.size();
+      uint16_t cacheSize = call Cache.size();
       uint16_t i;
       for (i = 0; i < cacheSize; i++) {
-         uint16_t src = call CacheSrc.get(i);
-         uint16_t seq = call CacheSeq.get(i);
-
-         if (src == Package->src && seq == Package->seq) {
+         if (samePack(Package, call Cache.get(i))) {
             return TRUE;
          }
       }

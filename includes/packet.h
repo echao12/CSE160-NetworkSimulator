@@ -38,6 +38,17 @@ void logPack(pack *input){
 	input->src, input->dest, input->seq, input->TTL, input->protocol, input->payload);
 }
 
+/*
+ * samePack
+ * 	Check whether two packets are the same.
+ * @param:
+ * 		pack *P1 = the first packet.
+ *		pack *P2 = the second packet.
+ */
+bool samePack(pack *P1, pack* P2) {
+	return (P1->src == P2->src) && (P1->dest == P2->dest) && (P1->seq == P2->seq) && (P1->protocol == P2->protocol) && (strcmp(P1->payload, P2->payload) == 0);
+}
+
 enum{
 	AM_PACK=6
 };
