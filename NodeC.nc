@@ -33,4 +33,9 @@ implementation {
 
     components new HashmapC(uint16_t, 25);//25 nodes to track
     Node.neighborMap -> HashmapC;
+    
+    components new ListC(uint16_t, MAX_CACHE_SIZE) as CacheSrcListC;
+    components new ListC(uint16_t, MAX_CACHE_SIZE) as CacheSeqListC;
+    Node.CacheSrc -> CacheSrcListC;
+    Node.CacheSeq -> CacheSeqListC;
 }

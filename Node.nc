@@ -22,7 +22,11 @@ module Node{
    uses interface SimpleSend as Sender;
 
    uses interface CommandHandler;
+   
    uses interface hashmap<uint16_t> as neighborMap;
+
+   uses interface List<uint16_t> as CacheSrc;
+   uses interface List<uint16_t> as CacheSeq;
 }
 
 implementation{
@@ -30,6 +34,7 @@ implementation{
 
    // Prototypes
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
+   bool checkCache(pack *Package);
 
    event void Boot.booted(){
       call AMControl.start();
@@ -53,6 +58,23 @@ implementation{
       if(len==sizeof(pack)){
          pack* myMsg=(pack*) payload;
          dbg(GENERAL_CHANNEL, "Package Payload: %s\n", myMsg->payload);
+
+         // Check for duplicate packet
+         if (checkCache(myMsg)) {
+            // If it's a duplicate packet, ignore it
+            dbg(GENERAL_CHANNEL, "Packet is a duplicate.\n");
+            return msg;
+         }
+
+         // Add packet to cache
+         if (call CacheSrc.isFull()) {
+            call CacheSrc.popfront();
+            call CacheSeq.popfront();
+         }
+         call CacheSrc.pushback(myMsg->src);
+         call CacheSeq.pushback(myMsg->seq);
+
+         // If it's a broadcast packet, repeat the broadcast
          if (myMsg->protocol == PROTOCOL_BROADCAST) {
             signal CommandHandler.broadcast(myMsg->payload);
          }
@@ -98,5 +120,19 @@ implementation{
       Package->seq = seq;
       Package->protocol = protocol;
       memcpy(Package->payload, payload, length);
+   }
+
+   bool checkCache(pack *Package) {
+      uint16_t cacheSize = call CacheSrc.size();
+      uint16_t i;
+      for (i = 0; i < cacheSize; i++) {
+         uint16_t src = call CacheSrc.get(i);
+         uint16_t seq = call CacheSeq.get(i);
+
+         if (src == Package->src && seq == Package->seq) {
+            return TRUE;
+         }
+      }
+      return FALSE;
    }
 }
