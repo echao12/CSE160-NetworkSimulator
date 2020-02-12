@@ -57,23 +57,24 @@ implementation{
          pack* myMsg=(pack*) payload;
          dbg(GENERAL_CHANNEL, "Package Payload: %s\n", myMsg->payload);
 
-         // Check for duplicate packet
-         if (checkCache(myMsg)) {
-            // If it's a duplicate packet, ignore it
-            dbg(GENERAL_CHANNEL, "Packet is a duplicate.\n");
-            return msg;
-         }
-
-         // Add packet to cache
-         if (call CacheSrc.isFull()) {
-            call CacheSrc.popfront();
-            call CacheSeq.popfront();
-         }
-         call CacheSrc.pushback(myMsg->src);
-         call CacheSeq.pushback(myMsg->seq);
-
          // If it's a flooding packet, continue the flood
          if (myMsg->protocol == PROTOCOL_FLOOD) {
+            // Check for duplicate packet first
+            if (checkCache(myMsg)) {
+               // If it's a duplicate packet, ignore it
+               dbg(GENERAL_CHANNEL, "Packet is a duplicate.\n");
+               return msg;
+            }
+
+            // Add packet to cache
+            if (call CacheSrc.isFull()) {
+               call CacheSrc.popfront();
+               call CacheSeq.popfront();
+            }
+            call CacheSrc.pushback(myMsg->src);
+            call CacheSeq.pushback(myMsg->seq);
+
+            // Propagate the signal
             signal CommandHandler.flood(myMsg->dest, myMsg->payload);
          }
          return msg;
