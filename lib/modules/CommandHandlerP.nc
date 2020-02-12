@@ -53,6 +53,16 @@ implementation{
                 signal CommandHandler.ping(buff[0], &buff[1]);
                 break;
 
+            case CMD_BROADCAST:
+                dbg(COMMAND_CHANNEL, "Command Type: Broadcast\n");
+                signal CommandHandler.broadcast(buff[0], &buff[1]);
+                break;
+
+            case CMD_FLOOD:
+                dbg(COMMAND_CHANNEL, "Command Type: Flood\n");
+                signal CommandHandler.flood(buff[0], &buff[1]);
+                break;
+
             case CMD_NEIGHBOR_DUMP:
                 dbg(COMMAND_CHANNEL, "Command Type: Neighbor Dump\n");
                 signal CommandHandler.printNeighbors();
@@ -76,11 +86,6 @@ implementation{
             case CMD_TEST_SERVER:
                 dbg(COMMAND_CHANNEL, "Command Type: Client\n");
                 signal CommandHandler.setTestServer();
-                break;
-
-            case CMD_BROADCAST:
-                dbg(COMMAND_CHANNEL, "Command Type: Broadcast\n");
-                signal CommandHandler.broadcast(&buff[0]);
                 break;
 
             default:
