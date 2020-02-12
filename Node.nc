@@ -72,9 +72,9 @@ implementation{
          call CacheSrc.pushback(myMsg->src);
          call CacheSeq.pushback(myMsg->seq);
 
-         // If it's a broadcast packet, repeat the broadcast
-         if (myMsg->protocol == PROTOCOL_BROADCAST) {
-            signal CommandHandler.broadcast(myMsg->payload);
+         // If it's a flooding packet, continue the flood
+         if (myMsg->protocol == PROTOCOL_FLOOD) {
+            signal CommandHandler.flood(myMsg->dest, myMsg->payload);
          }
          return msg;
       }
@@ -89,9 +89,9 @@ implementation{
       call Sender.send(sendPackage, destination);
    }
 
-   event void CommandHandler.broadcast(uint8_t *payload){
-      dbg(GENERAL_CHANNEL, "BROADCAST EVENT \n");
-      makePack(&sendPackage, TOS_NODE_ID, AM_BROADCAST_ADDR, 0, PROTOCOL_BROADCAST, 0, payload, PACKET_MAX_PAYLOAD_SIZE);
+   event void CommandHandler.flood(uint16_t destination, uint8_t *payload){
+      dbg(FLOODING_CHANNEL, "FLOODING EVENT \n");
+      makePack(&sendPackage, TOS_NODE_ID, destination, 0, PROTOCOL_FLOOD, 0, payload, PACKET_MAX_PAYLOAD_SIZE);
       call Sender.send(sendPackage, AM_BROADCAST_ADDR);
    }
 

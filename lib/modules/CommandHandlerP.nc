@@ -78,9 +78,9 @@ implementation{
                 signal CommandHandler.setTestServer();
                 break;
 
-            case CMD_BROADCAST:
-                dbg(COMMAND_CHANNEL, "Command Type: Broadcast\n");
-                signal CommandHandler.broadcast(&buff[0]);
+            case CMD_FLOOD:
+                dbg(COMMAND_CHANNEL, "Command Type: Flood\n");
+                signal CommandHandler.flood(buff[0], &buff[1]);
                 break;
 
             default:
