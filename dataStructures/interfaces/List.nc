@@ -21,6 +21,7 @@ interface List<t>{
 	command t front();
 	command t back();
 	command bool isEmpty();
+	command bool isFull();
 	command uint16_t size();
 	command t get(uint16_t position);
 }

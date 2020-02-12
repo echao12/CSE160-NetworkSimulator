@@ -30,4 +30,9 @@ implementation {
 
     components CommandHandlerC;
     Node.CommandHandler -> CommandHandlerC;
+
+    components new ListC(uint16_t, MAX_CACHE_SIZE) as CacheSrcListC;
+    components new ListC(uint16_t, MAX_CACHE_SIZE) as CacheSeqListC;
+    Node.CacheSrc -> CacheSrcListC;
+    Node.CacheSeq -> CacheSeqListC;
 }

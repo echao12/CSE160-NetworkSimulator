@@ -84,6 +84,13 @@ implementation{
 			return FALSE;
 	}
 
+	command bool List.isFull(){
+		if(size == MAX_SIZE)
+			return TRUE;
+		else
+			return FALSE;
+	}
+
 	command uint16_t List.size(){
 		return size;
 	}
