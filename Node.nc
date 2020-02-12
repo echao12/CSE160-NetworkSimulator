@@ -22,6 +22,7 @@ module Node{
    uses interface SimpleSend as Sender;
 
    uses interface CommandHandler;
+   uses interface hashmap<uint16_t> as neighborMap;
 }
 
 implementation{

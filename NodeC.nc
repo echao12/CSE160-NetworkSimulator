@@ -30,4 +30,7 @@ implementation {
 
     components CommandHandlerC;
     Node.CommandHandler -> CommandHandlerC;
+
+    components new HashmapC(uint16_t, 25);//25 nodes to track
+    Node.neighborMap -> HashmapC;
 }
