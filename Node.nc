@@ -89,6 +89,12 @@ implementation{
       call Sender.send(sendPackage, destination);
    }
 
+   event void CommandHandler.broadcast(uint16_t destination, uint8_t *payload){
+      dbg(GENERAL_CHANNEL, "BROADCAST EVENT \n");
+      makePack(&sendPackage, TOS_NODE_ID, destination, 0, PROTOCOL_PING, 0, payload, PACKET_MAX_PAYLOAD_SIZE);
+      call Sender.send(sendPackage, AM_BROADCAST_ADDR);
+   }
+
    event void CommandHandler.flood(uint16_t destination, uint8_t *payload){
       dbg(FLOODING_CHANNEL, "FLOODING EVENT \n");
       makePack(&sendPackage, TOS_NODE_ID, destination, 0, PROTOCOL_FLOOD, 0, payload, PACKET_MAX_PAYLOAD_SIZE);
