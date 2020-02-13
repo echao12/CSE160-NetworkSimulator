@@ -58,8 +58,8 @@ implementation{
 
    //implement timer0 fired()
    event void timer0.fired(){
-      dbg(GENERAL_CHANNEL, "\n\nRepeated: finding neighbors to node %hhu\n\n", TOS_NODE_ID);
-      signal CommandHandler.ping(AM_BROADCAST_ADDR, "Are you my neighbor?\n");
+      dbg(NEIGHBOR_CHANNEL, "\n\nRepeated: finding neighbors to node %hhu\n\n", TOS_NODE_ID);
+      signal CommandHandler.ping(AM_BROADCAST_ADDR, "pinging...\n");
    }
 
    event message_t* Receive.receive(message_t* msg, void* payload, uint8_t len){
@@ -81,7 +81,7 @@ implementation{
          
          //ping reply
          if(myMsg->protocol == PROTOCOL_PING){
-            //set timer to broadcast to neighbors every 2 seconds
+            //set timer to broadcast to neighbors every second
             call timer0.startPeriodic(1000);
             //send acknowledgement reply
             signal CommandHandler.pingReply(myMsg->src);
