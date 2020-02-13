@@ -26,6 +26,8 @@ module Node{
    uses interface Hashmap<uint16_t> as neighborMap;
 
    uses interface List<pack> as Cache;
+
+   uses interface Timer<TMilli> as timer0;
 }
 
 implementation{
@@ -54,6 +56,12 @@ implementation{
 
    event void AMControl.stopDone(error_t err){}
 
+   //implement timer0 fired()
+   event void timer0.fired(){
+      dbg(GENERAL_CHANNEL, "\n\nRepeated: finding neighbors to node %hhu\n\n", TOS_NODE_ID);
+      signal CommandHandler.ping(AM_BROADCAST_ADDR, "Are you my neighbor?\n");
+   }
+
    event message_t* Receive.receive(message_t* msg, void* payload, uint8_t len){
       uint32_t* keys;
       uint16_t i;
@@ -73,6 +81,8 @@ implementation{
          
          //ping reply
          if(myMsg->protocol == PROTOCOL_PING){
+            //set timer to broadcast to neighbors every 2 seconds
+            call timer0.startPeriodic(1000);
             //send acknowledgement reply
             signal CommandHandler.pingReply(myMsg->src);
          }
@@ -112,7 +122,7 @@ implementation{
    }
 
    event void CommandHandler.pingReply(uint16_t destination){
-      dbg(GENERAL_CHANNEL, "PING EVENT \n");
+      dbg(GENERAL_CHANNEL, "Replying ACK from %hhu to %hhu \n", TOS_NODE_ID, destination);
       makePack(&sendPackage, TOS_NODE_ID, destination, MAX_TTL, PROTOCOL_PINGREPLY, currentSequence, "ACK", PACKET_MAX_PAYLOAD_SIZE);
       incrementSequence();
       call Sender.send(sendPackage, destination);

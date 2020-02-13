@@ -36,4 +36,7 @@ implementation {
     
     components new ListC(pack, MAX_CACHE_SIZE) as CacheC;
     Node.Cache -> CacheC;
+
+    components new TimerMilliC() as timer0;
+    Node.timer0 -> timer0;
 }
