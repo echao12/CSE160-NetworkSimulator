@@ -61,7 +61,7 @@ implementation{
       dbg(GENERAL_CHANNEL, "Packet Received\n");
       if(len==sizeof(pack)){
          pack* myMsg=(pack*) payload;
-         logPack(myMsg);
+         dbg(FLOODING_CHANNEL, "Packet Origin: %hhu\n", myMsg->src);
          dbg(GENERAL_CHANNEL, "Package Payload: %s\n", myMsg->payload);
 
          //add neighbor id to hashmap
