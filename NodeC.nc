@@ -34,6 +34,6 @@ implementation {
     components new HashmapC(uint16_t, MAX_NEIGHBORS_SIZE) as hmap;
     Node.neighborMap -> hmap;
     
-    components new ListC(pack*, MAX_CACHE_SIZE) as CacheC;
+    components new ListC(pack, MAX_CACHE_SIZE) as CacheC;
     Node.Cache -> CacheC;
 }

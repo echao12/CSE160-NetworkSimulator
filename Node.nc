@@ -25,15 +25,17 @@ module Node{
    
    uses interface Hashmap<uint16_t> as neighborMap;
 
-   uses interface List<pack*> as Cache;
+   uses interface List<pack> as Cache;
 }
 
 implementation{
    pack sendPackage;
+   uint16_t currentSequence = 0;
 
    // Prototypes
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
    bool checkCache(pack *Package);
+   void incrementSequence();
 
    event void Boot.booted(){
       call AMControl.start();
@@ -59,6 +61,7 @@ implementation{
       dbg(GENERAL_CHANNEL, "Packet Received\n");
       if(len==sizeof(pack)){
          pack* myMsg=(pack*) payload;
+         logPack(myMsg);
          dbg(GENERAL_CHANNEL, "Package Payload: %s\n", myMsg->payload);
 
          //add neighbor id to hashmap
@@ -88,7 +91,7 @@ implementation{
                // If the cache is already full, delete the oldest data
                call Cache.popfront();
             }
-            call Cache.pushback(myMsg);
+            call Cache.pushback(*myMsg);
 
             if (myMsg->dest != TOS_NODE_ID) {
                // Propagate the signal only if this node is the intended recipient
@@ -103,25 +106,29 @@ implementation{
 
    event void CommandHandler.ping(uint16_t destination, uint8_t *payload){
       dbg(GENERAL_CHANNEL, "PING EVENT \n");
-      makePack(&sendPackage, TOS_NODE_ID, destination, 0, PROTOCOL_PING, 0, payload, PACKET_MAX_PAYLOAD_SIZE);
+      makePack(&sendPackage, TOS_NODE_ID, destination, MAX_TTL, PROTOCOL_PING, currentSequence, payload, PACKET_MAX_PAYLOAD_SIZE);
+      incrementSequence();
       call Sender.send(sendPackage, destination);
    }
 
    event void CommandHandler.pingReply(uint16_t destination){
       dbg(GENERAL_CHANNEL, "PING EVENT \n");
-      makePack(&sendPackage, TOS_NODE_ID, destination, 0, PROTOCOL_PINGREPLY, 0, "ACK", PACKET_MAX_PAYLOAD_SIZE);
+      makePack(&sendPackage, TOS_NODE_ID, destination, MAX_TTL, PROTOCOL_PINGREPLY, currentSequence, "ACK", PACKET_MAX_PAYLOAD_SIZE);
+      incrementSequence();
       call Sender.send(sendPackage, destination);
    }
 
    event void CommandHandler.broadcast(uint16_t destination, uint8_t *payload){
       dbg(GENERAL_CHANNEL, "BROADCAST EVENT \n");
-      makePack(&sendPackage, TOS_NODE_ID, destination, 0, PROTOCOL_PING, 0, payload, PACKET_MAX_PAYLOAD_SIZE);
+      makePack(&sendPackage, TOS_NODE_ID, destination, MAX_TTL, PROTOCOL_PING, currentSequence, payload, PACKET_MAX_PAYLOAD_SIZE);
+      incrementSequence();
       call Sender.send(sendPackage, AM_BROADCAST_ADDR);
    }
 
    event void CommandHandler.flood(uint16_t destination, uint8_t *payload){
       dbg(FLOODING_CHANNEL, "FLOODING EVENT \n");
-      makePack(&sendPackage, TOS_NODE_ID, destination, 0, PROTOCOL_FLOOD, 0, payload, PACKET_MAX_PAYLOAD_SIZE);
+      makePack(&sendPackage, TOS_NODE_ID, destination, MAX_TTL, PROTOCOL_FLOOD, currentSequence, payload, PACKET_MAX_PAYLOAD_SIZE);
+      incrementSequence();
       call Sender.send(sendPackage, AM_BROADCAST_ADDR);
    }
 
@@ -167,10 +174,14 @@ implementation{
       uint16_t cacheSize = call Cache.size();
       uint16_t i;
       for (i = 0; i < cacheSize; i++) {
-         if (samePack(Package, call Cache.get(i))) {
+         if (samePack(*Package, call Cache.get(i))) {
             return TRUE;
          }
       }
       return FALSE;
+   }
+
+   void incrementSequence() {
+      currentSequence = (currentSequence + 1) % MAX_SEQUENCE_NUMBER;
    }
 }

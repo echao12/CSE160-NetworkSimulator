@@ -6,15 +6,17 @@
 #define PACKET_H
 
 
-# include "protocol.h"
+#include "protocol.h"
 #include "channels.h"
+#include <string.h>
 
 enum{
 	PACKET_HEADER_LENGTH = 8,
 	PACKET_MAX_PAYLOAD_SIZE = 28 - PACKET_HEADER_LENGTH,
 	MAX_TTL = 15,
 	MAX_CACHE_SIZE = 10,
-	MAX_NEIGHBORS_SIZE = 25
+	MAX_NEIGHBORS_SIZE = 25,
+	MAX_SEQUENCE_NUMBER = 255
 };
 
 
@@ -45,8 +47,8 @@ void logPack(pack *input){
  * 		pack *P1 = the first packet.
  *		pack *P2 = the second packet.
  */
-bool samePack(pack *P1, pack* P2) {
-	return (P1->src == P2->src) && (P1->dest == P2->dest) && (P1->seq == P2->seq) && (P1->protocol == P2->protocol) && (strcmp(P1->payload, P2->payload) == 0);
+bool samePack(pack P1, pack P2) {
+	return (P1.src == P2.src) && (P1.dest == P2.dest) && (P1.protocol == P2.protocol) && (strcmp(P1.payload, P2.payload) == 0);
 }
 
 enum{
