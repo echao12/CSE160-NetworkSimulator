@@ -90,8 +90,10 @@ implementation{
             }
             call Cache.pushback(myMsg);
 
-            // Propagate the signal
-            signal CommandHandler.flood(myMsg->dest, myMsg->payload);
+            if (myMsg->dest != TOS_NODE_ID) {
+               // Propagate the signal only if this node is the intended recipient
+              signal CommandHandler.flood(myMsg->dest, myMsg->payload);
+            }
          }
          return msg;
       }
