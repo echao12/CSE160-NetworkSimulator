@@ -28,6 +28,7 @@ module Node{
    uses interface List<pack> as Cache;
 
    uses interface Timer<TMilli> as timer0;
+   uses interface Random as Random;
 }
 
 implementation{
@@ -40,9 +41,15 @@ implementation{
    void incrementSequence();
 
    event void Boot.booted(){
+      uint16_t x;
       call AMControl.start();
 
       dbg(GENERAL_CHANNEL, "Booted\n");
+      //sending NeighborDiscovery ping
+      call timer0.startPeriodic(1000 + (call Random.rand16() % 4000));
+      //int x = Random.
+      //x = call Random.rand16();
+      //dbg(GENERAL_CHANNEL,"\n\nx is %hhu\n", x);
    }
 
    event void AMControl.startDone(error_t err){
@@ -58,7 +65,7 @@ implementation{
 
    //implement timer0 fired()
    event void timer0.fired(){
-      dbg(NEIGHBOR_CHANNEL, "\n\nRepeated: finding neighbors to node %hhu\n\n", TOS_NODE_ID);
+      
       signal CommandHandler.ping(AM_BROADCAST_ADDR, "pinging...\n");
    }
 
@@ -82,7 +89,7 @@ implementation{
          //ping reply
          if(myMsg->protocol == PROTOCOL_PING){
             //set timer to broadcast to neighbors every second
-            call timer0.startPeriodic(1000);
+            //call timer0.startPeriodic((1000 + call Random.rand16()) % 5000);
             //send acknowledgement reply
             signal CommandHandler.pingReply(myMsg->src);
          }
