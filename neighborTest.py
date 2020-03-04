@@ -15,15 +15,15 @@ def main():
     s.bootAll()
     
     # Add channels
-    s.addChannel(s.COMMAND_CHANNEL)
-    s.addChannel(s.GENERAL_CHANNEL)
-    s.addChannel(s.FLOODING_CHANNEL)
+    #s.addChannel(s.COMMAND_CHANNEL)
+    #s.addChannel(s.GENERAL_CHANNEL)
+    #s.addChannel(s.FLOODING_CHANNEL)
     s.addChannel(s.NEIGHBOR_CHANNEL)
 
     s.runTime(20)
 
     # Flood the network to find neighbors
-    s.flood(1, 2, "Hello there")
+    s.ping(1, 2, "Hello there")
     s.runTime(10)
     
     # Print neighbors
