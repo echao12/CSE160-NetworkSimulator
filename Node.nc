@@ -12,6 +12,7 @@
 #include "includes/CommandMsg.h"
 #include "includes/sendInfo.h"
 #include "includes/channels.h"
+#include "includes/route.h"
 
 module Node{
    uses interface Boot;
@@ -85,7 +86,7 @@ implementation{
          //check for new neighbor
          if(!call neighborMap.contains(myMsg->src)){
             call neighborMap.insert(myMsg->src, 1);
-            call routingTable.addNeighbor(myMsg->src);
+            call routingTable.mergeRoute(makeRoute(myMsg->src, myMsg->src, 0, MAX_ROUTE_TTL));
             dbg(NEIGHBOR_CHANNEL, "Inserted: %hhu\n", myMsg->src);
          }
          

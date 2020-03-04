@@ -1,12 +1,4 @@
-#define MAX_ROUTING_TABLE_SIZE 256
-#define MAX_ROUTE_TTL 120
-
-typedef struct {
-    uint16_t destination;
-    uint16_t nextHop;
-    uint16_t cost;
-    uint16_t TTL;  // what to do with this?
-} Route;
+#include "../../includes/route.h"
 
 interface RoutingTable {
     command void mergeRoute(Route route);
