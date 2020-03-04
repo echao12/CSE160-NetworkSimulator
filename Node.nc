@@ -27,6 +27,8 @@ module Node{
 
    uses interface List<pack> as Cache;
 
+   uses interface RoutingTable as routingTable;
+
    uses interface Timer<TMilli> as timer0;
    uses interface Random as Random;
 }
@@ -83,6 +85,7 @@ implementation{
          //check for new neighbor
          if(!call neighborMap.contains(myMsg->src)){
             call neighborMap.insert(myMsg->src, 1);
+            call routingTable.addNeighbor(myMsg->src);
             dbg(NEIGHBOR_CHANNEL, "Inserted: %hhu\n", myMsg->src);
          }
          
@@ -164,7 +167,9 @@ implementation{
       dbg(NEIGHBOR_CHANNEL, "*End nodeIDs*\n");
    }
 
-   event void CommandHandler.printRouteTable(){}
+   event void CommandHandler.printRouteTable(){
+      call routingTable.printTable();
+   }
 
    event void CommandHandler.printLinkState(){}
 
