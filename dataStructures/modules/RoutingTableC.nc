@@ -43,6 +43,11 @@ implementation {
         table[i] = route;
         table[i].TTL = MAX_ROUTE_TTL;
         table[i].cost += 1;
+
+        if (table[i].nextHop == 0) {
+            // A keyword that indicates this is a route to self
+            table[i].cost = 0;
+        }
     }
 
     command void RoutingTable.updateTable(Route* newRoutes, uint16_t numNewRoutes) {

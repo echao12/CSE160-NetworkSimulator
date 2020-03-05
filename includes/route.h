@@ -4,6 +4,7 @@
 #define MAX_ROUTING_TABLE_SIZE 256
 #define MAX_ROUTE_TTL 120
 #define UNREACHABLE 16
+#define ROUTE_SIZE 8
 
 typedef nx_struct Route {
     nx_uint16_t destination;
@@ -18,6 +19,15 @@ Route makeRoute(nx_uint16_t dest, nx_uint16_t next, nx_uint16_t c, nx_uint16_t t
     newRoute.nextHop = next;
     newRoute.cost = c;
     newRoute.TTL = ttl;
+    return newRoute;
+}
+
+Route copyRoute(Route route) {
+    Route newRoute;
+    newRoute.destination = route.destination;
+    newRoute.nextHop = route.nextHop;
+    newRoute.cost = route.cost;
+    newRoute.TTL = route.TTL;
     return newRoute;
 }
 

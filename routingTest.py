@@ -6,7 +6,7 @@ def main():
     s.runTime(10)
 
     # Load the network
-    s.loadTopo("split_loop.topo")
+    s.loadTopo("long_line.topo")
     
     # Add noise
     s.loadNoise("no_noise.txt")
@@ -23,7 +23,7 @@ def main():
 
     # Ping to start neighbor discovery
     s.ping(1, 2, "Hello there")
-    s.runTime(10)
+    s.runTime(100)
     
     # Print neighbors
     for nodeID in range(1, s.numMote+1):

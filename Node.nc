@@ -31,6 +31,7 @@ module Node{
    uses interface RoutingTable as routingTable;
 
    uses interface Timer<TMilli> as timer0;
+   uses interface Timer<TMilli> as routingTimer;
    uses interface Random as Random;
 }
 
@@ -48,11 +49,15 @@ implementation{
       call AMControl.start();
 
       dbg(GENERAL_CHANNEL, "Booted\n");
-      //sending NeighborDiscovery ping
+      
+      // Set timer for neighbor discovery
       call timer0.startPeriodic(1000 + (call Random.rand16() % 4000));
-      //int x = Random.
-      //x = call Random.rand16();
-      //dbg(GENERAL_CHANNEL,"\n\nx is %hhu\n", x);
+      
+      // Set timer for routing table broadcast
+      call routingTimer.startPeriodic(10000 + (call Random.rand16() % 5000));
+
+      // Add route to self to the routing table
+      call routingTable.mergeRoute(makeRoute(TOS_NODE_ID, 0, 0, MAX_ROUTE_TTL));
    }
 
    event void AMControl.startDone(error_t err){
@@ -66,10 +71,42 @@ implementation{
 
    event void AMControl.stopDone(error_t err){}
 
-   //implement timer0 fired()
    event void timer0.fired(){
-      
+      // Broadcast a message to all nearby nodes
       signal CommandHandler.ping(AM_BROADCAST_ADDR, "pinging...\n");
+   }
+
+   event void routingTimer.fired() {
+      // Send routing table to all neighbors
+      uint16_t i, j;
+      uint16_t numRoutes, numNeighbors;
+      Route* routes;
+      uint32_t* neighbors;
+
+//      dbg(ROUTING_CHANNEL, "Sending routing table to neighbors...\n");
+
+      numRoutes = call routingTable.size();
+      routes = call routingTable.getTable();
+      numNeighbors = call neighborMap.size();
+      neighbors = call neighborMap.getKeys();
+
+      makePack(&sendPackage, TOS_NODE_ID, AM_BROADCAST_ADDR, MAX_TTL, PROTOCOL_DV, 0, "payload", PACKET_MAX_PAYLOAD_SIZE);
+
+      for (i = 0; i < numRoutes; i++) {
+         // Put each route in a separate package
+         memset(&sendPackage.payload, '\0', PACKET_MAX_PAYLOAD_SIZE);
+         memcpy(&sendPackage.payload, &routes[i], ROUTE_SIZE);
+         
+         // Send to all neighbors
+         for (j = 0; j < numNeighbors; j++){
+            sendPackage.dest = neighbors[j];
+            call Sender.send(sendPackage, neighbors[j]);
+         }
+      }
+
+      for(i = 0; i < call neighborMap.size(); i++){
+         signal CommandHandler.ping(neighbors[i], "hello there");
+      }
    }
 
    event message_t* Receive.receive(message_t* msg, void* payload, uint8_t len){
@@ -86,7 +123,6 @@ implementation{
          //check for new neighbor
          if(!call neighborMap.contains(myMsg->src)){
             call neighborMap.insert(myMsg->src, 1);
-            call routingTable.mergeRoute(makeRoute(myMsg->src, myMsg->src, 0, MAX_ROUTE_TTL));
             dbg(NEIGHBOR_CHANNEL, "Inserted: %hhu\n", myMsg->src);
          }
          
@@ -119,6 +155,15 @@ implementation{
               signal CommandHandler.flood(myMsg->dest, myMsg->payload);
             }
          }
+
+         if (myMsg->protocol == PROTOCOL_DV) {
+            // Got a route from a neighbor
+            Route newRoute;
+            memcpy(&newRoute, &myMsg->payload, ROUTE_SIZE);
+            newRoute.nextHop = myMsg->src;
+            call routingTable.mergeRoute(newRoute);
+         }
+
          return msg;
       }
       dbg(GENERAL_CHANNEL, "Unknown Packet Type %d\n", len);

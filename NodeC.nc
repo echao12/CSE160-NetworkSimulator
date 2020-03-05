@@ -43,6 +43,9 @@ implementation {
     components new TimerMilliC() as timer0;
     Node.timer0 -> timer0;
 
+    components new TimerMilliC() as routingTimer;
+    Node.routingTimer -> routingTimer;
+
     components RandomC;
     Node.Random -> RandomC;
 }
