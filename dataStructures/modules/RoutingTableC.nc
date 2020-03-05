@@ -18,8 +18,8 @@ implementation {
                     break;
                 }
                 else if (route.nextHop == table[i].nextHop) {
-                    // Same destination, same nextHop, that means the cost to the destination must have changed
-                    // In that case, replace the current route with the new one
+                    // Same destination, same nextHop, but the cost could be different
+                    // Assume this information is more up-to-date and replace the old route
                     break;
                 }
                 else {
@@ -45,15 +45,6 @@ implementation {
         table[i].cost += 1;
     }
 
-    command void RoutingTable.addNeighbor(uint16_t neighborID) {
-        Route newRoute;
-        newRoute.destination = neighborID;
-        newRoute.nextHop = neighborID;
-        newRoute.cost = 0;
-        newRoute.TTL = MAX_ROUTE_TTL;
-        call RoutingTable.mergeRoute(newRoute);
-    }
-
     command void RoutingTable.updateTable(Route* newRoutes, uint16_t numNewRoutes) {
         uint16_t i;
 
@@ -62,17 +53,26 @@ implementation {
         }
     }
 
+    command Route* RoutingTable.getTable() {
+        return table;
+    }
+
     command uint16_t RoutingTable.lookup(uint16_t destination) {
+        // Get the corresponding nextHop for the given destination
         uint16_t i;
 
         for (i = 0; i < numRoutes; i++) {
-            if (destination == table[i].destination) {
+            if (destination == table[i].destination && table[i].cost < UNREACHABLE) {
                 return table[i].nextHop;
             }
         }
 
-        // No routes
-        return MAX_ROUTING_TABLE_SIZE;
+        // Destination is unreachable
+        return 0;
+    }
+
+    command uint16_t RoutingTable.size() {
+        return numRoutes;
     }
 
     command void RoutingTable.printTable() {

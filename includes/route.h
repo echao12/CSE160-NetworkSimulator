@@ -3,6 +3,7 @@
 
 #define MAX_ROUTING_TABLE_SIZE 256
 #define MAX_ROUTE_TTL 120
+#define UNREACHABLE 16
 
 typedef nx_struct Route {
     nx_uint16_t destination;
