@@ -20,7 +20,7 @@ def main():
     #s.addChannel(s.FLOODING_CHANNEL)
     s.addChannel(s.NEIGHBOR_CHANNEL)
 
-    s.runTime(20)
+   # s.runTime(20)
 
     # Flood the network to find neighbors
     s.ping(1, 2, "Hello there")

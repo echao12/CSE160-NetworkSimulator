@@ -44,11 +44,12 @@ implementation{
    bool checkCache(pack *Package);
    void incrementSequence();
 
+   //TinyOS Boot sequence completed, each mote calls this function.
    event void Boot.booted(){
-      uint16_t x;
-      call AMControl.start();
 
-      dbg(GENERAL_CHANNEL, "Booted\n");
+      call AMControl.start();//start radio
+
+      dbg(GENERAL_CHANNEL, "(%hhu)Booted\n", TOS_NODE_ID);
       
       // Set timer for neighbor discovery
       call timer0.startPeriodic(1000 + (call Random.rand16() % 4000));
@@ -57,6 +58,7 @@ implementation{
       call routingTimer.startPeriodic(10000 + (call Random.rand16() % 5000));
 
       // Add route to self to the routing table
+      // *note* destination 0 indicates a route to self.
       call routingTable.mergeRoute(makeRoute(TOS_NODE_ID, 0, 0, MAX_ROUTE_TTL));
    }
 
@@ -73,9 +75,11 @@ implementation{
 
    event void timer0.fired(){
       // Broadcast a message to all nearby nodes
+      //dbg(NEIGHBOR_CHANNEL, "sending ping from %hhu\n", TOS_NODE_ID);
       signal CommandHandler.ping(AM_BROADCAST_ADDR, "pinging...\n");
    }
 
+   //The mote's node sends a packet with its routes to its neighbors.
    event void routingTimer.fired() {
       // Send routing table to all neighbors
       uint16_t i, j;
@@ -83,7 +87,7 @@ implementation{
       Route* routes;
       uint32_t* neighbors;
 
-//      dbg(ROUTING_CHANNEL, "Sending routing table to neighbors...\n");
+      //dbg(ROUTING_CHANNEL, "Sending routing table to neighbors...\n");
 
       numRoutes = call routingTable.size();
       routes = call routingTable.getTable();
@@ -93,11 +97,14 @@ implementation{
       makePack(&sendPackage, TOS_NODE_ID, AM_BROADCAST_ADDR, MAX_TTL, PROTOCOL_DV, 0, "payload", PACKET_MAX_PAYLOAD_SIZE);
 
       for (i = 0; i < numRoutes; i++) {
-         // Put each route in a separate package
+         // Put each route in a separate package(recall the routingTable is an array of Route's)
+         
+         //fill address starting at .payload with max_payload_size(20) number of null terminators.
          memset(&sendPackage.payload, '\0', PACKET_MAX_PAYLOAD_SIZE);
+         //copy route_size(8) bytes from &routes[i] to payload address
          memcpy(&sendPackage.payload, &routes[i], ROUTE_SIZE);
          
-         // Send to all neighbors
+         // Send each route individually to all neighbors
          for (j = 0; j < numNeighbors; j++){
             sendPackage.dest = neighbors[j];
             call Sender.send(sendPackage, neighbors[j]);
@@ -157,10 +164,12 @@ implementation{
          }
 
          if (myMsg->protocol == PROTOCOL_DV) {
-            // Got a route from a neighbor
+            // Got a routingTable from a neighbor, copy data to newRoute
             Route newRoute;
             memcpy(&newRoute, &myMsg->payload, ROUTE_SIZE);
+            //setting nextHop to be from the sender.
             newRoute.nextHop = myMsg->src;
+            //merge this node's Routingtable with the new Routingtable.
             call routingTable.mergeRoute(newRoute);
          }
 

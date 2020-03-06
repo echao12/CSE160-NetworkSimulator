@@ -8,10 +8,12 @@ implementation {
     Route table[MAX_ROUTING_TABLE_SIZE];
     uint16_t numRoutes = 0;
 
+    //merge the incoming individual Route with the node's RoutingTable.
     command void RoutingTable.mergeRoute(Route route) {
         uint16_t i;
-
+        //checking known routes
         for (i = 0; i < numRoutes; i++) {
+            //Look for the corresponding destinations
             if (route.destination == table[i].destination) {
                 if (route.cost + 1 < table[i].cost) {
                     // Found a better route
@@ -28,7 +30,7 @@ implementation {
                 }
             }
         }
-
+        //no matching routes.
         if (i == numRoutes) {
             // Add as a new route
             if (numRoutes < MAX_ROUTING_TABLE_SIZE) {
@@ -83,7 +85,7 @@ implementation {
     command void RoutingTable.printTable() {
         uint16_t i;
       
-        dbg(ROUTING_CHANNEL, "Routing Table:\n");
+        dbg(ROUTING_CHANNEL, "Routing Table[%hhu]:\n", TOS_NODE_ID);
         dbg(ROUTING_CHANNEL, "Dest\tHop\tCount\n");
 
         for (i = 0; i < numRoutes; i++) {
