@@ -113,7 +113,7 @@ implementation{
    //The mote's node sends a packet with its routes to its neighbors.
    event void routingTimer.fired() {
       // Send routing table to all neighbors
-      uint16_t i, j;
+      uint16_t i, j, temp;
       uint16_t numRoutes, numNeighbors;
       Route* routes;
       uint32_t* neighbors;
@@ -138,12 +138,22 @@ implementation{
          // Send each route individually to all neighbors
          for (j = 0; j < numNeighbors; j++){
             sendPackage.dest = neighbors[j];
-            call packetsQueue.pushback(sendPackage);
-         }
-      }
+            
+            // Poison reverse
+            if (routes[i].nextHop == neighbors[j]) {
+               temp = routes[i].cost;
+               routes[i].cost = UNREACHABLE;
+               memcpy(&sendPackage.payload, &routes[i], ROUTE_SIZE);
+            }
 
-      for(i = 0; i < call neighborMap.size(); i++){
-         signal CommandHandler.ping(neighbors[i], "hello there");
+            call packetsQueue.pushback(sendPackage);
+
+            // Revert poison reverse
+            if (routes[i].nextHop == neighbors[j]) {
+               routes[i].cost = temp;
+               memcpy(&sendPackage.payload, &routes[i], ROUTE_SIZE);
+            }
+         }
       }
    }
 
