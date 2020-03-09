@@ -28,8 +28,11 @@ module Node{
 
    uses interface List<pack> as Cache;
 
+   uses interface List<pack> as packetsQueue;
+
    uses interface RoutingTable as routingTable;
 
+   uses interface Timer<TMilli> as packetsTimer;
    uses interface Timer<TMilli> as timer0;
    uses interface Timer<TMilli> as routingTimer;
    uses interface Random as Random;
@@ -50,12 +53,15 @@ implementation{
       call AMControl.start();//start radio
 
       dbg(GENERAL_CHANNEL, "(%hhu)Booted\n", TOS_NODE_ID);
+
+      // Set timer for sending packets
+      call packetsTimer.startPeriodic(25 + (call Random.rand16() % 25));
       
       // Set timer for neighbor discovery
       call timer0.startPeriodic(1000 + (call Random.rand16() % 4000));
       
       // Set timer for routing table broadcast
-      call routingTimer.startPeriodic(10000 + (call Random.rand16() % 5000));
+      call routingTimer.startPeriodic(5000 + (call Random.rand16() % 1000));
 
       // Add route to self to the routing table
       // *note* destination 0 indicates a route to self.
@@ -72,6 +78,31 @@ implementation{
    }
 
    event void AMControl.stopDone(error_t err){}
+
+   event void packetsTimer.fired() {
+      // If there's not packet to be sent, don't do anything
+      if (call packetsQueue.size() == 0) {
+         return;
+      }
+
+      // Otherwise, send the first packet in the queue
+      sendPackage = call packetsQueue.popfront();
+      if (sendPackage.protocol == PROTOCOL_PING) {
+         call Sender.send(sendPackage, sendPackage.dest);
+      }
+      else if (sendPackage.protocol == PROTOCOL_PINGREPLY) {
+         call Sender.send(sendPackage, sendPackage.dest);
+      }
+      else if (sendPackage.protocol == PROTOCOL_BROADCAST) {
+         call Sender.send(sendPackage, AM_BROADCAST_ADDR);
+      }
+      else if (sendPackage.protocol == PROTOCOL_FLOOD) {
+         call Sender.send(sendPackage, AM_BROADCAST_ADDR);
+      }
+      else if (sendPackage.protocol == PROTOCOL_DV) {
+         call Sender.send(sendPackage, sendPackage.dest);
+      }
+   }
 
    event void timer0.fired(){
       // Broadcast a message to all nearby nodes
@@ -107,7 +138,7 @@ implementation{
          // Send each route individually to all neighbors
          for (j = 0; j < numNeighbors; j++){
             sendPackage.dest = neighbors[j];
-            call Sender.send(sendPackage, neighbors[j]);
+            call packetsQueue.pushback(sendPackage);
          }
       }
 

@@ -37,14 +37,20 @@ implementation {
     components new ListC(pack, MAX_CACHE_SIZE) as CacheC;
     Node.Cache -> CacheC;
 
+    components new ListC(pack, MAX_PACKETS_QUEUE_SIZE) as packetsQueueC;
+    Node.packetsQueue -> packetsQueueC;
+
     components RoutingTableC;
     Node.routingTable -> RoutingTableC;
+
+    components new TimerMilliC() as packetsTimerC;
+    Node.packetsTimer -> packetsTimerC;
 
     components new TimerMilliC() as timer0;
     Node.timer0 -> timer0;
 
-    components new TimerMilliC() as routingTimer;
-    Node.routingTimer -> routingTimer;
+    components new TimerMilliC() as routingTimerC;
+    Node.routingTimer -> routingTimerC;
 
     components RandomC;
     Node.Random -> RandomC;

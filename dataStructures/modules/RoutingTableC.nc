@@ -89,7 +89,7 @@ implementation {
         dbg(ROUTING_CHANNEL, "Dest\tHop\tCount\n");
 
         for (i = 0; i < numRoutes; i++) {
-            dbg(ROUTING_CHANNEL, "%hhu\t\t%hhu\t%hhu\n", table[i].destination, table[i].nextHop, table[i].cost);
+            dbg(ROUTING_CHANNEL, "%hhu   \t%hhu\t%hhu\n", table[i].destination, table[i].nextHop, table[i].cost);
         }
     }
 }

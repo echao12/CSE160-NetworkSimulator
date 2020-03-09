@@ -5,16 +5,17 @@
 #ifndef PACKET_H
 #define PACKET_H
 
-
 #include "protocol.h"
 #include "channels.h"
 #include <string.h>
+
+#define MAX_CACHE_SIZE 10
+#define MAX_PACKETS_QUEUE_SIZE 255
 
 enum{
 	PACKET_HEADER_LENGTH = 8,
 	PACKET_MAX_PAYLOAD_SIZE = 28 - PACKET_HEADER_LENGTH,
 	MAX_TTL = 15,
-	MAX_CACHE_SIZE = 10,
 	MAX_NEIGHBORS_SIZE = 25,
 	MAX_SEQUENCE_NUMBER = 255
 };

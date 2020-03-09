@@ -23,7 +23,7 @@ def main():
 
     # Ping to start neighbor discovery
     s.ping(1, 2, "Hello there")
-    s.runTime(100)
+    s.runTime(5000)
     
     # Print neighbors
     for nodeID in range(1, s.numMote+1):
