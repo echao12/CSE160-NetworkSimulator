@@ -140,6 +140,19 @@ implementation{
       return map[0].value;
    }
 
+      command void Hashmap.set(uint32_t k, t input){
+      uint32_t i=0;	uint32_t j=0;
+      do{
+         j=hash(k, i);
+         if(map[j].key == k){
+            map[j].value = input;
+            return;
+         }
+         i++;
+      }while(i<HASH_MAX_SIZE);
+      return;
+   }
+
    command bool Hashmap.contains(uint32_t k){
       uint32_t i=0;	uint32_t j=0;
       /*

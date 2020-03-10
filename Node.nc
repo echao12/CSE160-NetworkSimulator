@@ -14,6 +14,7 @@
 #include "includes/channels.h"
 #include "includes/route.h"
 
+
 module Node{
    uses interface Boot;
 
@@ -25,6 +26,7 @@ module Node{
    uses interface CommandHandler;
    
    uses interface Hashmap<uint16_t> as neighborMap;
+   uses interface Hashmap<uint16_t> as activeNeighbors;
 
    uses interface List<pack> as Cache;
 
@@ -46,6 +48,7 @@ implementation{
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
    bool checkCache(pack *Package);
    void incrementSequence();
+   void updateNeighbors(uint16_t src);
 
    //TinyOS Boot sequence completed, each mote calls this function.
    event void Boot.booted(){
@@ -222,6 +225,8 @@ implementation{
                call neighborMap.insert(myMsg->src, 1);
                dbg(NEIGHBOR_CHANNEL, "Inserted: %hhu\n", myMsg->src);
             }
+            //dbg(NEIGHBOR_CHANNEL, "UPDATING ACTIVENEIGHBORS\n");
+            updateNeighbors(myMsg->src);
          }
          else if (myMsg->protocol == PROTOCOL_FLOOD) {
             // If it's a flooding packet, continue the flood
@@ -305,6 +310,16 @@ implementation{
          dbg(NEIGHBOR_CHANNEL, "%hhu\n", keys[i]);
       }
       dbg(NEIGHBOR_CHANNEL, "*End nodeIDs*\n");
+
+            
+      dbg(NEIGHBOR_CHANNEL, "**Active Neighbor nodeIDs:\n");
+
+      keys = call activeNeighbors.getKeys();
+      for(i = 0; i < call activeNeighbors.size(); i++){
+         dbg(NEIGHBOR_CHANNEL, "Node:%hhu\tNodeTTL:%hhu\n", keys[i], call neighborMap.get(keys[i]));
+      }
+      dbg(NEIGHBOR_CHANNEL, "*End Active nodeIDs*\n");
+
    }
 
    event void CommandHandler.printRouteTable(){
@@ -345,5 +360,41 @@ implementation{
 
    void incrementSequence() {
       currentSequence = (currentSequence + 1) % MAX_SEQUENCE_NUMBER;
+   }
+   void updateNeighbors(uint16_t src){
+      #define MAX_NEIGHBOR_TTL 20
+      uint16_t tempVal, i;
+      uint32_t *keys;
+      
+      //dbg(NEIGHBOR_CHANNEL, "\n****UPDATING ACTIVE NEIGHBORS****\nCurrent nodeId: %hhu\n", TOS_NODE_ID);
+      //decrements all values in neighborMap, updates src to max TTL
+      keys = call neighborMap.getKeys();
+      for(i = 0; i < call neighborMap.size(); i++){
+         //check if source
+         if(keys[i] != src){
+            //decrement everything else > 0
+            tempVal = call neighborMap.get(keys[i]);
+            if(tempVal > 0){
+               tempVal--;
+            }
+            //update TTL value
+            call neighborMap.set(keys[i], tempVal);
+         }
+         //updating the src node values
+         call neighborMap.set(src, MAX_NEIGHBOR_TTL);
+      }
+      //update activeNeighbors. only holds node info, not TTL
+      for(i = 0; i < call neighborMap.size(); i++){
+         if(call neighborMap.get(keys[i]) > 0){
+            //this node is active
+            if(!call activeNeighbors.contains(keys[i])){
+               call activeNeighbors.insert(keys[i], 0);
+            }
+         }else{
+            //inactive node, remove
+            call activeNeighbors.remove(keys[i]);
+         }
+      }
+
    }
 }
