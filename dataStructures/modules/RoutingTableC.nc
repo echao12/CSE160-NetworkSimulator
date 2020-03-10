@@ -46,6 +46,11 @@ implementation {
         table[i].TTL = MAX_ROUTE_TTL;
         table[i].cost += 1;
 
+        // Limit the cost to prevent it from going to infinity
+        if (table[i].cost > UNREACHABLE) {
+            table[i].cost = UNREACHABLE;
+        }
+
         if (table[i].nextHop == 0) {
             // A keyword that indicates this is a route to self
             table[i].cost = 0;
@@ -69,13 +74,33 @@ implementation {
         uint16_t i;
 
         for (i = 0; i < numRoutes; i++) {
-            if (destination == table[i].destination && table[i].cost < UNREACHABLE) {
-                return table[i].nextHop;
+            if (destination == table[i].destination) {
+                if (table[i].cost >= UNREACHABLE) {
+                    // Destination is unreachable
+                    return 0;
+                }
+                else {
+                    return table[i].nextHop;
+                }
             }
         }
 
         // Destination is unreachable
         return 0;
+    }
+
+    command uint16_t RoutingTable.getCost(uint16_t destination) {
+        // Get the corresponding cost to the given destination
+        uint16_t i;
+
+        for (i = 0; i < numRoutes; i++) {
+            if (destination == table[i].destination) {
+                return table[i].cost;
+            }
+        }
+
+        // Destination is unreachable
+        return UNREACHABLE;
     }
 
     command uint16_t RoutingTable.size() {

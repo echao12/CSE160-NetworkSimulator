@@ -5,6 +5,7 @@ interface RoutingTable {
     command void updateTable(Route* newRoutes, uint16_t numNewRoutes);
     command Route* getTable();
     command uint16_t lookup(uint16_t destination);
+    command uint16_t getCost(uint16_t destination);
     command uint16_t size();
     command void printTable();
 }

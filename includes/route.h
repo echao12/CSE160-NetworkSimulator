@@ -3,7 +3,7 @@
 
 #define MAX_ROUTING_TABLE_SIZE 256
 #define MAX_ROUTE_TTL 120
-#define UNREACHABLE 16
+#define UNREACHABLE 32
 #define ROUTE_SIZE 8
 
 typedef nx_struct Route {

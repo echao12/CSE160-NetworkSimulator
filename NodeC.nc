@@ -46,8 +46,8 @@ implementation {
     components new TimerMilliC() as packetsTimerC;
     Node.packetsTimer -> packetsTimerC;
 
-    components new TimerMilliC() as timer0;
-    Node.timer0 -> timer0;
+    components new TimerMilliC() as neighborTimerC;
+    Node.neighborTimer -> neighborTimerC;
 
     components new TimerMilliC() as routingTimerC;
     Node.routingTimer -> routingTimerC;
