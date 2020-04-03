@@ -56,4 +56,7 @@ implementation {
 
     components RandomC;
     Node.Random -> RandomC;
+
+    components TransportC;
+    Node.Transport -> TransportC;
 }

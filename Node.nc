@@ -13,6 +13,7 @@
 #include "includes/sendInfo.h"
 #include "includes/channels.h"
 #include "includes/route.h"
+#include "includes/socket.h"
 
 
 module Node{
@@ -38,11 +39,15 @@ module Node{
    uses interface Timer<TMilli> as neighborTimer;
    uses interface Timer<TMilli> as routingTimer;
    uses interface Random as Random;
+
+   //use the provided transport interface
+   uses interface Transport as Transport; // handles sockets
 }
 
 implementation{
    pack sendPackage;
    uint16_t currentSequence = 0;
+   //generate sockets
 
    // Prototypes
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
@@ -330,7 +335,36 @@ implementation{
 
    event void CommandHandler.printDistanceVector(){}
 
-   event void CommandHandler.setTestServer(){}
+   //sets up the server for this node
+   event void CommandHandler.setTestServer(uint16_t port){
+      //prepare the socket.
+      //might switch to a hashmap and map fd to addr...
+      socket_t fd;// socket #. note: socket is an entry into a file descriptor table
+      socket_addr_t addr; // holds socket port and addr
+
+      //allocate a socket and initialize
+      fd = call Transport.socket();
+      addr.addr = TOS_NODE_ID;
+      addr.port = port;
+
+      //bind the socket# to socket structure
+      if(call Transport.bind(fd, &addr) == SUCCESS){
+         dbg(TRANSPORT_CHANNEL,"Server: SUCCESSFULLY bounded address (%hhu) to socket (%hhu)\n", TOS_NODE_ID, fd);
+      }else{
+         //probably fd is a NULL Socket, thus no available sockets to bind
+         //thus we must remove a connection
+         dbg(TRANSPORT_CHANNEL,"Server: FAILED to bind address (%hhu) to socket (%hhu)\n", TOS_NODE_ID, fd);
+      }
+      //listen for connections from the socket
+      //will foce close any current connections in this socket
+      //listen will set a timer to fire Transport.accept() periodically to check for incoming connections
+      if(call Transport.listen(fd) == SUCCESS){
+         //modified socket state to listen
+         dbg(TRANSPORT_CHANNEL, "Server: Listening at socket (%hhu)...\n", fd);
+      }else{
+         dbg(TRANSPORT_CHANNEL, "Server: FAILED to switch socket(%hhu)'s state to LISTEN...\n", fd);
+      }
+   }
 
    event void CommandHandler.setTestClient(){}
 

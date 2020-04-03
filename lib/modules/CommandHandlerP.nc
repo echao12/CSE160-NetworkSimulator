@@ -50,6 +50,11 @@ implementation{
             // value and the string in the remainder of the payload
             case CMD_PING:
                 dbg(COMMAND_CHANNEL, "Command Type: Ping\n");
+                // if the python code is s.ping(2,3,"msg"), i don't really know
+                // how commandhandler checks to see if node 2 is the one executing
+                // because the code just assumes that we are already at node 2
+                // since we call ping(buff[0],&buff[1]), 
+                // which takes buff[0] as dest and &buff[1] as the start of the payload
                 signal CommandHandler.ping(buff[0], &buff[1]);
                 break;
 
@@ -77,15 +82,19 @@ implementation{
                 dbg(COMMAND_CHANNEL, "Command Type: Route Table Dump\n");
                 signal CommandHandler.printRouteTable();
                 break;
-
+            
             case CMD_TEST_CLIENT:
                 dbg(COMMAND_CHANNEL, "Command Type: Client\n");
                 signal CommandHandler.setTestClient();
                 break;
 
             case CMD_TEST_SERVER:
-                dbg(COMMAND_CHANNEL, "Command Type: Client\n");
-                signal CommandHandler.setTestServer();
+                //the python script: cmdTestServer( [address], [port]):
+                //as stated before, dunno how the code checks if we are at the correct
+                //node, but whatever.
+                //assuming we are at address(node#) already, just need port? 
+                dbg(COMMAND_CHANNEL, "Command Type: Server\n");
+                signal CommandHandler.setTestServer(buff[0]);
                 break;
 
             default:
