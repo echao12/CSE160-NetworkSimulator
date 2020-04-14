@@ -13,6 +13,8 @@ class TestSim:
     CMD_PING = 0
     CMD_NEIGHBOR_DUMP = 1
     CMD_ROUTE_DUMP = 3
+    CMD_TEST_CLIENT = 4
+    CMD_TEST_SERVER = 5
     CMD_BROADCAST = 7
     CMD_FLOOD = 8
 
@@ -132,6 +134,12 @@ class TestSim:
 
     def routeDMP(self, destination):
         self.sendCMD(self.CMD_ROUTE_DUMP, destination, "routing command");
+
+    def testClient(self, source, source_port, destination, destination_port, transfer):
+        self.sendCMD(self.CMD_TEST_CLIENT, source, "{0}{1}{2}{3}".format(chr(destination), chr(source_port), chr(destination_port), chr(transfer)))
+
+    def testServer(self, address, port):
+        self.sendCMD(self.CMD_TEST_SERVER, address, "{0}".format(chr(port)))
 
     def addChannel(self, channelName, out=sys.stdout):
         print 'Adding Channel', channelName;

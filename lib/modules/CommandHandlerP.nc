@@ -85,14 +85,10 @@ implementation{
             
             case CMD_TEST_CLIENT:
                 dbg(COMMAND_CHANNEL, "Command Type: Client\n");
-                signal CommandHandler.setTestClient();
+                signal CommandHandler.setTestClient(buff[0], buff[1], buff[2], buff[3]);
                 break;
 
             case CMD_TEST_SERVER:
-                //the python script: cmdTestServer( [address], [port]):
-                //as stated before, dunno how the code checks if we are at the correct
-                //node, but whatever.
-                //assuming we are at address(node#) already, just need port? 
                 dbg(COMMAND_CHANNEL, "Command Type: Server\n");
                 signal CommandHandler.setTestServer(buff[0]);
                 break;

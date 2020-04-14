@@ -9,7 +9,7 @@ interface CommandHandler{
    event void printLinkState();
    event void printDistanceVector();
    event void setTestServer(uint16_t port);
-   event void setTestClient();
+   event void setTestClient(uint16_t destination, uint16_t sourcePort, uint16_t destinationPort, uint16_t transfer);
    event void setAppServer();
    event void setAppClient();
 }

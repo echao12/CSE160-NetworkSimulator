@@ -342,6 +342,8 @@ implementation{
       socket_t fd;// socket #. note: socket is an entry into a file descriptor table
       socket_addr_t addr; // holds socket port and addr
 
+      dbg(TRANSPORT_CHANNEL, "Test Server %hhu port %hhu\n", TOS_NODE_ID, port);
+
       //allocate a socket and initialize
       fd = call Transport.socket();
       addr.addr = TOS_NODE_ID;
@@ -366,7 +368,9 @@ implementation{
       }
    }
 
-   event void CommandHandler.setTestClient(){}
+   event void CommandHandler.setTestClient(uint16_t destination, uint16_t sourcePort, uint16_t destinationPort, uint16_t transfer){
+      dbg(TRANSPORT_CHANNEL, "Test Client %hhu destination %hhu source port %hhu destination port %hhu transfer %hhu\n", TOS_NODE_ID, destination, sourcePort, destinationPort, transfer);
+   }
 
    event void CommandHandler.setAppServer(){}
 
