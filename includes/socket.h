@@ -6,6 +6,7 @@ enum{
     ROOT_SOCKET_ADDR = 255,
     ROOT_SOCKET_PORT = 255,
     SOCKET_BUFFER_SIZE = 128,
+    NULL_SOCKET = 0, // Socket number 0 is designated as NULL, it should never be used
 };
 
 enum socket_state{

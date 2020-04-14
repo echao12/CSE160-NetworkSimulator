@@ -13,9 +13,8 @@ module TransportP{
 
 
 implementation{
-    socket_t listenFd = NULL;
+    socket_t listenFd = NULL_SOCKET;
 
-//define functions
    /**
     * Get a socket if there is one available.
     * @Side Client/Server
@@ -26,8 +25,8 @@ implementation{
     */
    command socket_t Transport.socket(){
        //declare vars at top!
-       socket_t fd = NULL;//should return NULL if unable to allocate.
-       uint8_t temp = 0;
+       socket_t fd = NULL_SOCKET; //should return NULL if unable to allocate.
+       uint8_t temp = 1;
        //check socketList to see if it has room
        if(!call socketList.isFull()){
            // assign next available socket number
@@ -62,7 +61,7 @@ implementation{
         socket_store_t socketConfig;
         error_t error;
         dbg(TRANSPORT_CHANNEL, "Binding: fd(%hhu) to src_addr(P:%hhu / ID:%hhu)\n", fd, addr->port, addr->addr);
-        if(fd != NULL && addr != NULL){
+        if(fd != NULL_SOCKET && addr != NULL){
             socketConfig.src.port = addr->port;//i guess TOS_NODE_ID is address and already a given?
             socketConfig.src.addr = addr->addr;
             socketConfig.fd = fd;
@@ -181,69 +180,76 @@ implementation{
     *   to listen else FAIL.
     */
    command error_t Transport.listen(socket_t fd){
-        socket_store_t socket;
-        bool found = FALSE;
-        error_t error;
+       socket_store_t socket;
+       bool found = FALSE;
+       error_t error;
        dbg(TRANSPORT_CHANNEL, "Attempting to listen to socket %hhu\n", fd);
-        //will hard close fd...force change state w/o signaling the change??
-        if(call usedSockets.contains(fd)){
-            dbg(TRANSPORT_CHANNEL,"socket %hhu is i use, force closing...\n", fd);
-            //force change socket state
-            //first find it
-            while(!found){
-                socket = call socketList.front();
-                if(socket.fd == fd){
-                    dbg(TRANSPORT_CHANNEL,"FOUND socket %hhu in socketList to close...\n", fd);
-                    //found it, change state and clear data
-                    socket.state = LISTEN;
-                    socket.dest.port = NULL;
-                    socket.dest.addr = NULL;
-                    //remove indicator of established connection
-                    call usedSockets.set(fd, 0);
-                    found = TRUE;
-                }
-                //not it
-                call socketList.popfront();
-                call socketList.pushback(socket);
-            }
-                dbg(TRANSPORT_CHANNEL,"Starting timer to listen for connections...\n");
-                listenFd = fd;
-                //will check for connection to accept every 5 seconds
-                call listenTimer.startPeriodic(5000);
-                error = SUCCESS;
-                return error;
-        }else{
-            dbg(TRANSPORT_CHANNEL,"Socket %hhu is not in use. Looking for it in socketList..\n", fd);
-            //not in usedSockets, fresh connection
+       //will hard close fd...force change state w/o signaling the change??
+       if(call usedSockets.contains(fd)){
+           dbg(TRANSPORT_CHANNEL,"socket %hhu is in use, force closing...\n", fd);
+           //force change socket state
+           //first find it
            while(!found){
-                socket = call socketList.front();
-                if(socket.fd == fd){
-                    //found it, change state and clear data
-                    socket.state = LISTEN;
-                    found = TRUE;
-                    //dbg(TRANSPORT_CHANNEL,"FOUND and switched state to LISTEN...\n");
-                }
-                //not it
-                call socketList.popfront();
-                call socketList.pushback(socket);
-            }
-                dbg(TRANSPORT_CHANNEL,"Starting timer to listen for connections...\n");
-                listenFd = fd;
-                //will check for connection to accept every 5 seconds
-                call listenTimer.startPeriodic(5000);
-                error = SUCCESS;
-                return error;
-        }
-        listenFd = NULL;
-        dbg(TRANSPORT_CHANNEL,"Failed to listen to socket %hhu...\n", fd);
-        error = FAIL;
-        return error;
+               socket = call socketList.front();
+               if(socket.fd == fd){
+                   dbg(TRANSPORT_CHANNEL,"FOUND socket %hhu in socketList to close...\n", fd);
+                   //found it, change state and clear data
+                   socket.state = LISTEN;
+                   socket.dest.port = 0;
+                   socket.dest.addr = 0;
+                   //remove indicator of established connection
+                   call usedSockets.set(fd, 0);
+                   found = TRUE;
+               }
+               //not it
+               call socketList.popfront();
+               call socketList.pushback(socket);
+           }
+           dbg(TRANSPORT_CHANNEL,"Starting timer to listen for connections...\n");
+           listenFd = fd;
+           //will check for connection to accept every 5 seconds
+           call listenTimer.startPeriodic(5000);
+           error = SUCCESS;
+           return error;
+       }
+       else{
+           // Shouldn't we do nothing if the specified socket is not being used?
+           dbg(TRANSPORT_CHANNEL, "Failed to listen to socket %hhu as it is not being used\n", fd);
+           error = FAIL;
+           return error;
+
+        //    dbg(TRANSPORT_CHANNEL,"Socket %hhu is not in use. Looking for it in socketList..\n", fd);
+        //    //not in usedSockets, fresh connection
+        //    while(!found){
+        //        socket = call socketList.front();
+        //        if(socket.fd == fd){
+        //            //found it, change state and clear data
+        //            socket.state = LISTEN;
+        //            found = TRUE;
+        //            //dbg(TRANSPORT_CHANNEL,"FOUND and switched state to LISTEN...\n");
+        //        }
+        //        //not it
+        //        call socketList.popfront();
+        //        call socketList.pushback(socket);
+        //    }
+        //    dbg(TRANSPORT_CHANNEL,"Starting timer to listen for connections...\n");
+        //    listenFd = fd;
+        //    //will check for connection to accept every 5 seconds
+        //    call listenTimer.startPeriodic(5000);
+        //    error = SUCCESS;
+        //    return error;
+       }
+       listenFd = NULL_SOCKET;
+       dbg(TRANSPORT_CHANNEL,"Failed to listen to socket %hhu...\n", fd);
+       error = FAIL;
+       return error;
    }
-/*  TIMER FUNCTIONS */
-       event void listenTimer.fired(){
-        if(listenFd != NULL){
-            //attempt to connect with the listening socket
-            call Transport.accept(listenFd);
-        }
-    }
+
+   /*  TIMER FUNCTIONS */
+   event void listenTimer.fired(){
+       if(listenFd != NULL_SOCKET){
+           //attempt to connect with the listening socket
+           call Transport.accept(listenFd);
+       }
+   }
 }

@@ -13,8 +13,9 @@ implementation{
     //Timers
     TransportP.listenTimer -> lTimer;
     TransportP.Random -> Random;
+    
     //Lists
-    components new ListC(socket_store_t, 10);
+    components new ListC(socket_store_t, MAX_NUM_OF_SOCKETS);
     TransportP.socketList -> ListC;
 
     components new HashmapC(socket_t, MAX_NUM_OF_SOCKETS) as map;
