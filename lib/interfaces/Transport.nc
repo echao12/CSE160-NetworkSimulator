@@ -1,5 +1,6 @@
 #include "../../includes/packet.h"
 #include "../../includes/socket.h"
+#include "../../includes/protocol.h"
 
 /**
  * The Transport interface handles sockets and is a layer of abstraction
@@ -80,6 +81,16 @@ interface Transport{
     *    packet or FAIL if there are errors.
     */
    command error_t receive(pack* package);
+
+   /**
+    * Send a package via Node.nc
+    * @param
+    *    pack *package: the TCP packet to be sent.
+    * @Side Client/Server 
+    * @return uint16_t - return SUCCESS if you are able to send this
+    *    packet or FAIL if there are errors.
+    */
+   event error_t send(pack* package);
 
    /**
     * Read from the socket and write this data to the buffer. This data

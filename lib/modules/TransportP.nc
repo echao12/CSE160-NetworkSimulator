@@ -13,7 +13,13 @@ module TransportP{
 
 
 implementation{
-    socket_t listenFd = NULL_SOCKET;
+   socket_t listenFd = NULL_SOCKET;
+   pack sendPackage;
+   tcp_pack TCPPackage;
+
+   void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
+   void makeTCPPack(tcp_pack *Package, uint8_t srcPort, uint8_t destPort, uint16_t byteSeq, uint16_t acknowledgement, uint8_t flags, uint8_t advertisedWindow, uint8_t *payload, uint8_t length);
+   void extractTCPPack(pack *Package, tcp_pack* TCPPack);
 
    /**
     * Get a socket if there is one available.
@@ -115,7 +121,10 @@ implementation{
     * @return uint16_t - return SUCCESS if you are able to handle this
     *    packet or FAIL if there are errors.
     */
-   command error_t Transport.receive(pack* package){}
+   command error_t Transport.receive(pack* package){
+       extractTCPPack(package, &TCPPackage);
+       logTCPPack(&TCPPackage);
+   }
 
    /**
     * Read from the socket and write this data to the buffer. This data
@@ -146,7 +155,59 @@ implementation{
     * @return socket_t - returns SUCCESS if you are able to attempt
     *    a connection with the fd passed, else return FAIL.
     */
-   command error_t Transport.connect(socket_t fd, socket_addr_t * addr){}
+   command error_t Transport.connect(socket_t fd, socket_addr_t * addr){
+       bool found = FALSE;
+       socket_store_t socket;
+       pack packet;
+
+       if (call usedSockets.contains(fd)) {
+           // If socket fd exists, extract it from the list
+           while (!found) {
+               socket = call socketList.popfront();
+               if (socket.fd == fd) {
+                   break;
+               }
+               else {
+                   call socketList.pushback(socket);
+               }
+           }
+
+           if (socket.state == CLOSED) {
+               // This socket is currently idle
+               // Set the destination address
+               socket.dest = *addr;
+
+               // Send a SYN packet
+               makeTCPPack(&TCPPackage, socket.src.port, socket.dest.port, 0, 0, 0, 0, "SYN", TCP_PACKET_MAX_PAYLOAD_SIZE);
+               setFlagBit(&TCPPackage, SYN_FLAG_BIT);
+               makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+               memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+
+               if (signal Transport.send(&sendPackage) == SUCCESS) {
+                   socket.state = SYN_SENT;
+                   return SUCCESS;
+               }
+           }
+           else if (socket.state == SYN_SENT) {
+               // This socket has already sent a SYN packet
+               if (socket.dest.addr == addr->addr && socket.dest.port == addr->port) {
+                   // Same destination, resend the SYN packet
+                   // Send a SYN packet
+                   makeTCPPack(&TCPPackage, socket.src.port, socket.dest.port, 0, 0, 0, 0, "", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                   setFlagBit(&TCPPackage, SYN_FLAG_BIT);
+                   makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+                   memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+                   signal Transport.send(&sendPackage);
+               }
+               else {
+                   // If the destination is different this time, what to do?
+                   return FAIL;
+               }
+           }
+       }
+
+       return FAIL;
+   }
 
    /**
     * Closes the socket.
@@ -251,5 +312,28 @@ implementation{
            //attempt to connect with the listening socket
            call Transport.accept(listenFd);
        }
+   }
+
+   void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t protocol, uint16_t seq, uint8_t* payload, uint8_t length){
+      Package->src = src;
+      Package->dest = dest;
+      Package->TTL = TTL;
+      Package->seq = seq;
+      Package->protocol = protocol;
+      memcpy(Package->payload, payload, length);
+   }
+
+   void makeTCPPack(tcp_pack *Package, uint8_t srcPort, uint8_t destPort, uint16_t byteSeq, uint16_t acknowledgement, uint8_t flags, uint8_t advertisedWindow, uint8_t *payload, uint8_t length) {
+      Package->srcPort = srcPort;
+      Package->destPort = destPort;
+      Package->byteSeq = byteSeq;
+      Package->acknowledgement = acknowledgement;
+      Package->flags = flags;
+      Package->advertisedWindow = advertisedWindow;
+      memcpy(Package->payload, payload, length);
+   }
+
+   void extractTCPPack(pack *Package, tcp_pack *TCPPack) {
+       memcpy(TCPPack, &Package->payload, PACKET_MAX_PAYLOAD_SIZE);
    }
 }

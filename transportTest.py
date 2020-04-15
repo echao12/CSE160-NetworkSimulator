@@ -21,17 +21,17 @@ def main():
     s.addChannel(s.GENERAL_CHANNEL);
     s.addChannel(s.TRANSPORT_CHANNEL);
 
-    # After sending a ping, simulate a little to prevent collision.
+    # Give some time for the nodes to find neighbors and build routing tables
+    s.runTime(1000)
 
-    s.runTime(300);
-    s.testServer(1, 1);
+    # Designate a node as the server
+    s.testServer(1, 100);
     s.runTime(60);
 
-    s.testClient(4, 1, 1, 1, 10);
+    # Designate a node as the client and begin transmission
+    s.testClient(4, 200, 1, 100, 10);
     s.runTime(1);
     s.runTime(1000);
-
-
 
 if __name__ == '__main__':
     main()

@@ -136,6 +136,13 @@ implementation{
          // No need to check for nextHop because the destination is guaranteed to be a neighbor
          call Sender.send(sendPackage, sendPackage.dest);
       }
+      else if (sendPackage.protocol == PROTOCOL_TCP) {
+         nextHop = call routingTable.lookup(sendPackage.dest);
+         if (nextHop != 0) {
+            dbg(TRANSPORT_CHANNEL, "Sending TCP packet, next hop: %hhu\n", nextHop);
+            call Sender.send(sendPackage, nextHop);
+         }
+      }
    }
 
    event void neighborTimer.fired(){
@@ -263,6 +270,17 @@ implementation{
             //merge this node's Routingtable with the new Routingtable.
             call routingTable.mergeRoute(newRoute);
          }
+         else if (myMsg->protocol == PROTOCOL_TCP) {
+            if (myMsg->dest == TOS_NODE_ID) {
+               // If this is the intended destination, let the Transport module handle the TCP packet
+               dbg(TRANSPORT_CHANNEL, "Received a TCP packet from (%hhu)\n", myMsg->src);
+               call Transport.receive(myMsg);
+            }
+            else {
+               // If this is not the intended destination, forward the packet
+               call packetsQueue.pushback(*myMsg);
+            }
+         }
 
          return msg;
       }
@@ -369,12 +387,31 @@ implementation{
    }
 
    event void CommandHandler.setTestClient(uint16_t destination, uint16_t sourcePort, uint16_t destinationPort, uint16_t transfer){
+      socket_t socket;
+      socket_addr_t sourceAddress, destinationAddress;
+
       dbg(TRANSPORT_CHANNEL, "Test Client %hhu destination %hhu source port %hhu destination port %hhu transfer %hhu\n", TOS_NODE_ID, destination, sourcePort, destinationPort, transfer);
+
+      sourceAddress.addr = TOS_NODE_ID;
+      sourceAddress.port = sourcePort;
+      destinationAddress.addr = destination;
+      destinationAddress.port = destinationPort;
+
+      socket = call Transport.socket();
+
+      if (call Transport.bind(socket, &sourceAddress) == SUCCESS) {
+         call Transport.connect(socket, &destinationAddress);
+      }
    }
 
    event void CommandHandler.setAppServer(){}
 
    event void CommandHandler.setAppClient(){}
+
+   event error_t Transport.send(pack* package){
+      dbg(TRANSPORT_CHANNEL, "Sending packet from (%hhu) to (%hhu)\n", package->src, package->dest);
+      call packetsQueue.pushback(*package);
+   }
 
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t protocol, uint16_t seq, uint8_t* payload, uint8_t length){
       Package->src = src;
