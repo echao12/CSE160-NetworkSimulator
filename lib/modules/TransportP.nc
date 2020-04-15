@@ -8,7 +8,8 @@ module TransportP{
    uses interface List<socket_store_t> as socketList;
    uses interface Timer<TMilli> as listenTimer;
    uses interface Random;
-   uses interface Hashmap<socket_t> as usedSockets;//mainly used to track available fd's. value of 1 is established connection
+   //track available sockets. value(0):open socket, value(1) established connection
+   uses interface Hashmap<socket_t> as usedSockets;
 }
 
 
@@ -16,6 +17,7 @@ implementation{
    socket_t listenFd = NULL_SOCKET;
    pack sendPackage;
    tcp_pack TCPPackage;
+   socket_t curSocketNumber;
 
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
    void makeTCPPack(tcp_pack *Package, uint8_t srcPort, uint8_t destPort, uint16_t byteSeq, uint16_t acknowledgement, uint8_t flags, uint8_t advertisedWindow, uint8_t *payload, uint8_t length);
@@ -122,8 +124,61 @@ implementation{
     *    packet or FAIL if there are errors.
     */
    command error_t Transport.receive(pack* package){
-       extractTCPPack(package, &TCPPackage);
-       logTCPPack(&TCPPackage);
+       bool found = FALSE;
+       int numAttempts = 0;
+       socket_store_t socket;
+
+        dbg(TRANSPORT_CHANNEL, "Transport Module: \nNODE(%hhu) RECIEVED TCP package:\n", TOS_NODE_ID);
+        extractTCPPack(package, &TCPPackage);
+        logTCPPack(&TCPPackage);
+        //find the socket info
+        while(found == FALSE && numAttempts < MAX_NUM_OF_SOCKETS){
+            socket = call socketList.popfront();
+            //dbg(TRANSPORT_CHANNEL,"CHECKING SOCKET VALUES:\nsocketAddr:%hhu, pkgDest:%hhu\nsocketPort:%hhu, pkgPort:%hhu\n",
+            //socket.src.addr, package->dest, socket.src.port, TCPPackage.destPort);
+            if(socket.src.addr == package->dest && socket.src.port == TCPPackage.destPort){
+                dbg(TRANSPORT_CHANNEL,"FOUND SOCKET\n");
+                found = TRUE;
+            }else{
+                call socketList.pushback(socket);
+                numAttempts++;
+            }
+        }
+        if(found){
+            dbg(TRANSPORT_CHANNEL, "Checking socket state...(STATE:%hhu)\n", socket.state);
+            //LISTEN
+            if(socket.state == LISTEN){
+                dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: LISTENING...\n");
+                //check for a SYN msg
+                if(checkFlagBit(&TCPPackage, SYN_FLAG_BIT)){
+                    dbg(TRANSPORT_CHANNEL, "RECIEVED SYN PACKET\nREPLYING with SYN/ACK TCP Packet\n");
+                    //record packet source as this port's destination
+                    socket.dest.addr = package->src;
+                    socket.dest.port = TCPPackage.srcPort;
+                    //record sequence#
+                    socket.lastRcvd = package->seq;//NOT TOO SURE ABOUT THIS ONE
+                    socket.nextExpected = package->seq + 1;
+                    //generate SYN packet with ack
+                    makeTCPPack(&TCPPackage, socket.src.port, socket.dest.port, 0, socket.nextExpected, 0, 0, "SYN_REPLY", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                    setFlagBit(&TCPPackage, SYN_FLAG_BIT);
+                    setFlagBit(&TCPPackage, ACK_FLAG_BIT);
+                    makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+                    memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+                    signal Transport.send(&sendPackage);
+                }
+            }
+            //SYN_SENT
+            //SYN_RCVD
+            //ESTABLISHED
+            //CLOSED
+            //LISTEN
+
+            //push socket back into list
+            call socketList.pushfront(socket);
+        }else{
+            dbg(TRANSPORT_CHANNEL, "FAILED: Could not find corresponding socket for the packet.\n*DROPPED TCP PACKET!*\n");
+        }
+        
    }
 
    /**
@@ -182,9 +237,13 @@ implementation{
                setFlagBit(&TCPPackage, SYN_FLAG_BIT);
                makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
                memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
-
+               dbg(TRANSPORT_CHANNEL,"CLIENT[%hhu][%hhu]: Sending a SYN packet to Server[%hhu][%hhu]...\n",
+                    socket.src.addr, socket.src.port, socket.dest.addr, socket.dest.port);
                if (signal Transport.send(&sendPackage) == SUCCESS) {
                    socket.state = SYN_SENT;
+                   //push socket back into list
+                   call socketList.pushfront(socket);
+                   dbg(TRANSPORT_CHANNEL,"SUCCESSFULLY SENT SYN PACKAGE\n");
                    return SUCCESS;
                }
            }
@@ -247,25 +306,29 @@ implementation{
        dbg(TRANSPORT_CHANNEL, "Attempting to listen to socket %hhu\n", fd);
        //will hard close fd...force change state w/o signaling the change??
        if(call usedSockets.contains(fd)){
-           dbg(TRANSPORT_CHANNEL,"socket %hhu is in use, force closing...\n", fd);
-           //force change socket state
-           //first find it
-           while(!found){
-               socket = call socketList.front();
-               if(socket.fd == fd){
-                   dbg(TRANSPORT_CHANNEL,"FOUND socket %hhu in socketList to close...\n", fd);
-                   //found it, change state and clear data
-                   socket.state = LISTEN;
-                   socket.dest.port = 0;
-                   socket.dest.addr = 0;
-                   //remove indicator of established connection
-                   call usedSockets.set(fd, 0);
-                   found = TRUE;
-               }
-               //not it
-               call socketList.popfront();
-               call socketList.pushback(socket);
+           //looking for socket...
+            while(!found){
+                    socket = call socketList.popfront();
+                    if(socket.fd == fd){
+                        dbg(TRANSPORT_CHANNEL,"FOUND socket %hhu in socketList to close...\n", fd);
+                        found = TRUE;
+                    }
+                    //not it
+                    call socketList.pushback(socket);
+                }
+            //Found it, check for active connection and change states.
+            //NOTE: 0 REFERS TO AN OPEN SOCKET, NOT A SOCKET WITH AN ESTABLISHED CONNECTION
+           if(call usedSockets.get(fd) != 0){
+                dbg(TRANSPORT_CHANNEL,"socket %hhu is in use, force closing...\n", fd);
+                //remove indicator of established connection
+                call usedSockets.set(fd, 0);
            }
+           //changing socket to LISTEN
+            socket.state = LISTEN;
+            socket.dest.port = 0;
+            socket.dest.addr = 0;
+            call socketList.pushfront(socket);//pushing data back into list
+            dbg(TRANSPORT_CHANNEL, "Changed socket state to LISTEN(%hhu)\n", socket.state);
            dbg(TRANSPORT_CHANNEL,"Starting timer to listen for connections...\n");
            listenFd = fd;
            //will check for connection to accept every 5 seconds

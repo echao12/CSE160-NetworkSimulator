@@ -33,7 +33,7 @@ typedef nx_struct pack{
 enum{
 	TCP_PACKET_HEADER_LENGTH = 8,
 	TCP_PACKET_MAX_PAYLOAD_SIZE = PACKET_MAX_PAYLOAD_SIZE - TCP_PACKET_HEADER_LENGTH,
-	SYN_FLAG_BIT = 0,
+	SYN_FLAG_BIT = 0,//note: value is literally bit position
 	ACK_FLAG_BIT = 1,
 	FIN_FLAG_BIT = 2
 };

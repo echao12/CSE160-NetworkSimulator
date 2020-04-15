@@ -221,6 +221,7 @@ implementation{
                call packetsQueue.pushback(*myMsg);
             }
          }
+
          else if (myMsg->protocol == PROTOCOL_PINGREPLY) {
             if (myMsg->dest == TOS_NODE_ID) {
                dbg(ROUTING_CHANNEL, "Acknowledgement received\n");
@@ -230,6 +231,7 @@ implementation{
                call packetsQueue.pushback(*myMsg);
             }
          }
+
          else if (myMsg->protocol == PROTOCOL_BROADCAST) {
             //add neighbor id to hashmap
             //check for new neighbor
@@ -240,6 +242,7 @@ implementation{
             //dbg(NEIGHBOR_CHANNEL, "UPDATING ACTIVENEIGHBORS\n");
             updateNeighbors(myMsg->src);
          }
+
          else if (myMsg->protocol == PROTOCOL_FLOOD) {
             // If it's a flooding packet, continue the flood
             // Check for duplicate packet first
@@ -261,6 +264,7 @@ implementation{
               signal CommandHandler.flood(myMsg->dest, myMsg->payload);
             }
          }
+
          else if (myMsg->protocol == PROTOCOL_DV) {
             // Got a routingTable from a neighbor, copy data to newRoute
             Route newRoute;
@@ -270,6 +274,7 @@ implementation{
             //merge this node's Routingtable with the new Routingtable.
             call routingTable.mergeRoute(newRoute);
          }
+         
          else if (myMsg->protocol == PROTOCOL_TCP) {
             if (myMsg->dest == TOS_NODE_ID) {
                // If this is the intended destination, let the Transport module handle the TCP packet
@@ -400,6 +405,9 @@ implementation{
       socket = call Transport.socket();
 
       if (call Transport.bind(socket, &sourceAddress) == SUCCESS) {
+         dbg(TRANSPORT_CHANNEL,"Client: SUCESSFULLY bounded address(%hhu) to socket (%hhu)\n", TOS_NODE_ID, socket);
+         dbg(TRANSPORT_CHANNEL,"Client: Attempting connection from client(%hhu):port(%hhu) to server(&hhu):port(%hhu)...\n",
+            TOS_NODE_ID, socket, destination, destinationPort);
          call Transport.connect(socket, &destinationAddress);
       }
    }
