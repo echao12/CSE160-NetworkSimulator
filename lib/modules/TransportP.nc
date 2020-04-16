@@ -10,6 +10,10 @@ module TransportP{
    uses interface Random;
    //track available sockets. value(0):open socket, value(1) established connection
    uses interface Hashmap<socket_t> as usedSockets;
+
+   // track outstanding packets
+   uses interface List<pack> as outstandingPackets;
+   uses interface Timer<TMilli> as resendTimer;
 }
 
 
@@ -22,6 +26,7 @@ implementation{
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
    void makeTCPPack(tcp_pack *Package, uint8_t srcPort, uint8_t destPort, uint16_t byteSeq, uint16_t acknowledgement, uint8_t flags, uint8_t advertisedWindow, uint8_t *payload, uint8_t length);
    void extractTCPPack(pack *Package, tcp_pack* TCPPack);
+   void acknowledgePacket(pack *Package);
 
    /**
     * Get a socket if there is one available.
@@ -77,6 +82,7 @@ implementation{
             call socketList.pushback(socketConfig);//adding it to this node's socketlist
             dbg(TRANSPORT_CHANNEL, "SUCESSFULLY BOUNDED!\n");
             error = SUCCESS;
+            call resendTimer.startPeriodic(RTT_ESTIMATE);
        }else{
             dbg(TRANSPORT_CHANNEL, "FAILED TO BIND!\n");
             error = FAIL;
@@ -173,6 +179,7 @@ implementation{
                 memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
                 
                 if (signal Transport.send(&sendPackage) == SUCCESS) {
+                    call outstandingPackets.pushback(sendPackage);
                     socket.state = SYN_RCVD;
                     error = SUCCESS;
                 }
@@ -192,6 +199,8 @@ implementation{
                 memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
 
                 if (signal Transport.send(&sendPackage) == SUCCESS) {
+                    acknowledgePacket(package);
+                    call outstandingPackets.pushback(sendPackage);
                     socket.state = ESTABLISHED;
                     error = SUCCESS;
                 }
@@ -208,6 +217,7 @@ implementation{
                 socket.state = ESTABLISHED;  // Change state to ESTABLISHED no matter what
                 
                 // TODO: Acknowledge the packet
+                acknowledgePacket(package);
             }
         }
         //ESTABLISHED
@@ -265,6 +275,7 @@ implementation{
        bool found = FALSE;
        socket_store_t socket;
        pack packet;
+       error_t error;
 
        if (call usedSockets.contains(fd)) {
            // If socket fd exists, extract it from the list
@@ -293,12 +304,12 @@ implementation{
                dbg(TRANSPORT_CHANNEL,"CLIENT[%hhu][%hhu]: Sending a SYN packet to Server[%hhu][%hhu]...\n",
                     socket.src.addr, socket.src.port, socket.dest.addr, socket.dest.port);
                if (signal Transport.send(&sendPackage) == SUCCESS) {
+                   call outstandingPackets.pushback(sendPackage);
                    socket.state = SYN_SENT;
                    socket.lastSent = 0;
                    //push socket back into list
-                   call socketList.pushfront(socket);
                    dbg(TRANSPORT_CHANNEL,"SUCCESSFULLY SENT SYN PACKAGE\n");
-                   return SUCCESS;
+                   error = SUCCESS;
                }
            }
            else if (socket.state == SYN_SENT) {
@@ -310,16 +321,22 @@ implementation{
                    setFlagBit(&TCPPackage, SYN_FLAG_BIT);
                    makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
                    memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
-                   signal Transport.send(&sendPackage);
+                   if (signal Transport.send(&sendPackage) == SUCCESS) {
+                       call outstandingPackets.pushback(sendPackage);
+                       error = SUCCESS;
+                   }
                }
                else {
                    // If the destination is different this time, what to do?
-                   return FAIL;
+                   error = FAIL;
                }
            }
+
+           //push socket back into list
+           call socketList.pushfront(socket);
        }
 
-       return FAIL;
+       return error;
    }
 
    /**
@@ -428,6 +445,41 @@ implementation{
        if(listenFd != NULL_SOCKET){
            //attempt to connect with the listening socket
            call Transport.accept(listenFd);
+       }
+   }
+
+   event void resendTimer.fired() {
+       // When this timer fires, just resend all outstanding packets
+       pack packet;
+       uint16_t i, numOutstanding = call outstandingPackets.size();
+       for (i = 0; i < numOutstanding; i++) {
+           packet = call outstandingPackets.get(i);
+           signal Transport.send(&packet);
+       }
+   }
+
+   void acknowledgePacket(pack* ackPack) {
+       // Try to match the ACK packet with an outstanding packet and remove that outstanding packet from the list
+       pack sentPack;
+       tcp_pack sentTCP, ackTCP;
+       uint16_t i, numOutstanding = call outstandingPackets.size();
+       extractTCPPack(ackPack, &ackTCP);
+       if (checkFlagBit(&ackTCP, ACK_FLAG_BIT)) {
+           for (i = 0; i < numOutstanding; i++) {
+               sentPack = call outstandingPackets.popfront();
+               if (sentPack.src == ackPack->dest && sentPack.dest == ackPack->src) {
+                   extractTCPPack(&sentPack, &sentTCP);
+                   if (sentTCP.srcPort == ackTCP.destPort && sentTCP.destPort && ackTCP.srcPort) {
+                       if (sentTCP.byteSeq < ackTCP.acknowledgement && sentTCP.byteSeq + TCP_PACKET_MAX_PAYLOAD_SIZE + 1 >= ackTCP.acknowledgement) {
+                           // Found a match (not sure if this is correct)
+                           dbg(TRANSPORT_CHANNEL, "Outstanding packet removed\n");
+                           break;
+                       }
+                   }
+               }
+               // The packet doesn't match, return it to the list
+               call outstandingPackets.pushback(sentPack);
+           }
        }
    }
 

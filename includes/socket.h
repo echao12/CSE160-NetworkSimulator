@@ -7,7 +7,7 @@ enum{
     ROOT_SOCKET_PORT = 255,
     SOCKET_BUFFER_SIZE = 128,
     NULL_SOCKET = 0, // Socket number 0 is designated as NULL, it should never be used
-    RTT_ESTIMATE = 5000,  // Conservative RTT estimate
+    RTT_ESTIMATE = 30000,  // Conservative RTT estimate
 };
 
 enum socket_state{

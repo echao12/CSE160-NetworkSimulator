@@ -139,7 +139,7 @@ implementation{
       else if (sendPackage.protocol == PROTOCOL_TCP) {
          nextHop = call routingTable.lookup(sendPackage.dest);
          if (nextHop != 0) {
-            dbg(TRANSPORT_CHANNEL, "Sending TCP packet, next hop: %hhu\n", nextHop);
+            // dbg(TRANSPORT_CHANNEL, "Sending TCP packet, next hop: %hhu\n", nextHop);
             call Sender.send(sendPackage, nextHop);
          }
       }
