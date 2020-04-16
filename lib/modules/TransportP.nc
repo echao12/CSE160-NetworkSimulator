@@ -136,6 +136,7 @@ implementation{
        int numAttempts = 0;
        socket_store_t socket;
        error_t error = FAIL;
+       uint8_t windowSize = 1;
 
         dbg(TRANSPORT_CHANNEL, "Transport Module: \nNODE(%hhu) RECIEVED TCP Packet seq#(%hhu)\n", TOS_NODE_ID, package->seq);
         extractTCPPack(package, &TCPPackage);
@@ -232,17 +233,38 @@ implementation{
                     socket.src.addr, socket.src.port, socket.dest.addr, socket.dest.port);
                 acknowledgePacket(package);
                 //Send effective window
+                //Send effective window to client
+                dbg(TRANSPORT_CHANNEL, "Sending effective window size (%hhu)\n", windowSize);
+                makeTCPPack(&TCPPackage, socket.src.port, socket.dest.port, socket.lastSent+1, socket.nextExpected, 0, windowSize, "Windowing...", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                TCPPackage.flags = 0;//reset flags
+                setFlagBit(&TCPPackage, ACK_FLAG_BIT);
+                makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+                memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+                if(signal Transport.send(&sendPackage) == SUCCESS){
+                    makeOutstanding(sendPackage, RTT_ESTIMATE);
+                    socket.lastSent++;
+                }
             }
         }
         //ESTABLISHED
         else if (socket.state == ESTABLISHED) {
+            //received a packet, update info
+            socket.lastRcvd = TCPPackage.byteSeq;
+            socket.nextExpected = TCPPackage.byteSeq + 1;
+            acknowledgePacket(package);//packet received
             dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: ESTABLISHED\n");
             // Drop any SYN packet
             if (checkFlagBit(&TCPPackage, SYN_FLAG_BIT)) {
                 // Do nothing
             }
             else if (checkFlagBit(&TCPPackage, ACK_FLAG_BIT)) {
-                // TODO: Do something with the packet
+                dbg(TRANSPORT_CHANNEL, "Recieved ACK Packet.\t");
+                dbg(TRANSPORT_CHANNEL, "AdvertiseWindow size(%hhu)\n", TCPPackage.advertisedWindow);
+                if(TCPPackage.advertisedWindow != socket.effectiveWindow){
+                    dbg(TRANSPORT_CHANNEL,"Adjusted effectiveWindow(%hhu) to match advertisedWindow(%hhu)...\n", socket.effectiveWindow, TCPPackage.advertisedWindow);
+                    socket.effectiveWindow = TCPPackage.advertisedWindow;
+                }
+
             }else if(TCPPackage.flags == 0){
 
             }

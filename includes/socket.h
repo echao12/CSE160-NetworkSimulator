@@ -16,6 +16,11 @@ enum socket_state{
     ESTABLISHED,
     SYN_SENT,
     SYN_RCVD,
+    FIN_WAIT_1,
+    CLOSE_WAIT,
+    FIN_WAIT_2,
+    LAST_ACK,
+    TIME_WAIT,
 };
 
 
