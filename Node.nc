@@ -406,7 +406,7 @@ implementation{
 
       if (call Transport.bind(socket, &sourceAddress) == SUCCESS) {
          dbg(TRANSPORT_CHANNEL,"Client: SUCESSFULLY bounded address(%hhu) to socket (%hhu)\n", TOS_NODE_ID, socket);
-         dbg(TRANSPORT_CHANNEL,"Client: Attempting connection from client(%hhu):port(%hhu) to server(&hhu):port(%hhu)...\n",
+         dbg(TRANSPORT_CHANNEL,"Client: Attempting connection from client(%hhu):port(%hhu) to server(%hhu):port(%hhu)...\n",
             TOS_NODE_ID, socket, destination, destinationPort);
          call Transport.connect(socket, &destinationAddress);
       }
@@ -419,6 +419,7 @@ implementation{
    event error_t Transport.send(pack* package){
       dbg(TRANSPORT_CHANNEL, "Sending packet from (%hhu) to (%hhu)\n", package->src, package->dest);
       call packetsQueue.pushback(*package);
+      return SUCCESS;
    }
 
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t protocol, uint16_t seq, uint8_t* payload, uint8_t length){

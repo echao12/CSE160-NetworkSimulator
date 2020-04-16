@@ -127,10 +127,12 @@ implementation{
        bool found = FALSE;
        int numAttempts = 0;
        socket_store_t socket;
+       error_t error = FAIL;
 
         dbg(TRANSPORT_CHANNEL, "Transport Module: \nNODE(%hhu) RECIEVED TCP package:\n", TOS_NODE_ID);
         extractTCPPack(package, &TCPPackage);
         logTCPPack(&TCPPackage);
+
         //find the socket info
         while(found == FALSE && numAttempts < MAX_NUM_OF_SOCKETS){
             socket = call socketList.popfront();
@@ -144,41 +146,90 @@ implementation{
                 numAttempts++;
             }
         }
-        if(found){
-            dbg(TRANSPORT_CHANNEL, "Checking socket state...(STATE:%hhu)\n", socket.state);
-            //LISTEN
-            if(socket.state == LISTEN){
-                dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: LISTENING...\n");
-                //check for a SYN msg
-                if(checkFlagBit(&TCPPackage, SYN_FLAG_BIT)){
-                    dbg(TRANSPORT_CHANNEL, "RECIEVED SYN PACKET\nREPLYING with SYN/ACK TCP Packet\n");
-                    //record packet source as this port's destination
-                    socket.dest.addr = package->src;
-                    socket.dest.port = TCPPackage.srcPort;
-                    //record sequence#
-                    socket.lastRcvd = package->seq;//NOT TOO SURE ABOUT THIS ONE
-                    socket.nextExpected = package->seq + 1;
-                    //generate SYN packet with ack
-                    makeTCPPack(&TCPPackage, socket.src.port, socket.dest.port, 0, socket.nextExpected, 0, 0, "SYN_REPLY", TCP_PACKET_MAX_PAYLOAD_SIZE);
-                    setFlagBit(&TCPPackage, SYN_FLAG_BIT);
-                    setFlagBit(&TCPPackage, ACK_FLAG_BIT);
-                    makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
-                    memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
-                    signal Transport.send(&sendPackage);
+
+        if (!found) {
+            dbg(TRANSPORT_CHANNEL, "FAILED: Could not find corresponding socket for the packet.\n*DROPPED TCP PACKET!*\n");
+            return FAIL;
+        }
+
+        dbg(TRANSPORT_CHANNEL, "Checking socket state...(STATE:%hhu)\n", socket.state);
+        //LISTEN
+        if(socket.state == LISTEN){
+            dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: LISTENING...\n");
+            //check for a SYN msg
+            if(checkFlagBit(&TCPPackage, SYN_FLAG_BIT)){
+                dbg(TRANSPORT_CHANNEL, "RECEIVED SYN PACKET\nREPLYING with SYN/ACK TCP Packet\n");
+                //record packet source as this port's destination
+                socket.dest.addr = package->src;
+                socket.dest.port = TCPPackage.srcPort;
+                //record sequence#
+                socket.lastRcvd = TCPPackage.byteSeq;
+                socket.nextExpected = TCPPackage.byteSeq + 1;
+                //generate SYN packet with ack
+                makeTCPPack(&TCPPackage, socket.src.port, socket.dest.port, 0, socket.nextExpected, 0, 0, "SYN_REPLY", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                setFlagBit(&TCPPackage, SYN_FLAG_BIT);
+                setFlagBit(&TCPPackage, ACK_FLAG_BIT);
+                makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+                memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+                
+                if (signal Transport.send(&sendPackage) == SUCCESS) {
+                    socket.state = SYN_RCVD;
+                    error = SUCCESS;
                 }
             }
-            //SYN_SENT
-            //SYN_RCVD
-            //ESTABLISHED
-            //CLOSED
-            //LISTEN
-
-            //push socket back into list
-            call socketList.pushfront(socket);
-        }else{
-            dbg(TRANSPORT_CHANNEL, "FAILED: Could not find corresponding socket for the packet.\n*DROPPED TCP PACKET!*\n");
         }
-        
+        //SYN_SENT
+        else if (socket.state == SYN_SENT) {
+            dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: SYN_SENT\n");
+            // Check for SYN+ACK packet
+            if (checkFlagBit(&TCPPackage, SYN_FLAG_BIT) && checkFlagBit(&TCPPackage, ACK_FLAG_BIT)) {
+                dbg(TRANSPORT_CHANNEL, "RECEIVED SYN+ACK PACKET\nREPLYING with ACK TCP Packet\n");
+                socket.lastAck = TCPPackage.acknowledgement - 1;
+                // Make ACK packet
+                makeTCPPack(&TCPPackage, socket.src.port, socket.dest.port, socket.lastSent+1, TCPPackage.byteSeq+1, 0, 0, "ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                setFlagBit(&TCPPackage, ACK_FLAG_BIT);
+                makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+                memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+
+                if (signal Transport.send(&sendPackage) == SUCCESS) {
+                    socket.state = ESTABLISHED;
+                    error = SUCCESS;
+                }
+            }
+        }
+        //SYN_RCVD
+        else if (socket.state == SYN_RCVD) {
+            dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: SYN_RCVD\n");
+            // Check for any ACK packet
+            if (checkFlagBit(&TCPPackage, ACK_FLAG_BIT)) {
+                dbg(TRANSPORT_CHANNEL, "RECEIVED ACK PACKET\n");
+                socket.lastRcvd = TCPPackage.byteSeq;
+                socket.nextExpected = TCPPackage.byteSeq + 1;
+                socket.state = ESTABLISHED;  // Change state to ESTABLISHED no matter what
+                
+                // TODO: Acknowledge the packet
+            }
+        }
+        //ESTABLISHED
+        else if (socket.state == ESTABLISHED) {
+            dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: ESTABLISHED\n");
+            // Drop any SYN packet
+            if (checkFlagBit(&TCPPackage, SYN_FLAG_BIT)) {
+                // Do nothing
+            }
+            else if (checkFlagBit(&TCPPackage, ACK_FLAG_BIT)) {
+                // TODO: Do something with the packet
+            }
+        }
+        //CLOSED
+        else if (socket.state == CLOSED) {
+            // This socket is not open to communication, so do nothing
+            dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: CLOSED\n");
+        }
+
+        //push socket back into list
+        call socketList.pushfront(socket);
+        return error;
    }
 
    /**
@@ -237,10 +288,13 @@ implementation{
                setFlagBit(&TCPPackage, SYN_FLAG_BIT);
                makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
                memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+               socket.lastWritten = 0;
+
                dbg(TRANSPORT_CHANNEL,"CLIENT[%hhu][%hhu]: Sending a SYN packet to Server[%hhu][%hhu]...\n",
                     socket.src.addr, socket.src.port, socket.dest.addr, socket.dest.port);
                if (signal Transport.send(&sendPackage) == SUCCESS) {
                    socket.state = SYN_SENT;
+                   socket.lastSent = 0;
                    //push socket back into list
                    call socketList.pushfront(socket);
                    dbg(TRANSPORT_CHANNEL,"SUCCESSFULLY SENT SYN PACKAGE\n");
