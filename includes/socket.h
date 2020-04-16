@@ -8,7 +8,8 @@ enum{
     SOCKET_BUFFER_SIZE = 128,
     NULL_SOCKET = 0, // Socket number 0 is designated as NULL, it should never be used
     RTT_ESTIMATE = 30000,  // Conservative RTT estimate
-    TCP_SEND_TIMER = 500,  // Controls how frequently the application (Node) will write to the socket's send buffer
+    TCP_WRITE_TIMER = 500,  // Controls how frequently the application (Node) will write to the socket's send buffer
+    TCP_READ_TIMER = 500,
 };
 
 enum socket_state{

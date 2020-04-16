@@ -60,6 +60,9 @@ implementation {
     components TransportC;
     Node.Transport -> TransportC;
 
-    components new TimerMilliC() as TCPSendTimerC;
-    Node.TCPSendTimer -> TCPSendTimerC;
+    components new TimerMilliC() as TCPWriteTimerC;
+    Node.TCPWriteTimer -> TCPWriteTimerC;
+
+    components new TimerMilliC() as TCPReadTimerC;
+    Node.TCPReadTimer -> TCPReadTimerC;
 }

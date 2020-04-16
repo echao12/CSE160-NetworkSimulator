@@ -326,7 +326,28 @@ implementation{
     * @return uint16_t - return the amount of data you are able to read
     *    from the pass buffer. This may be shorter then bufflen
     */
-   command uint16_t Transport.read(socket_t fd, uint8_t *buff, uint16_t bufflen){}
+    command uint16_t Transport.read(socket_t fd, uint8_t *buff, uint16_t bufflen){
+        socket_store_t* socket;
+        uint16_t i, num;
+        
+        // Get the specified socket
+        socket = getSocketPtr(fd);
+
+        if (socket == NULL) {
+            // The specified socket doesn't exist
+            // dbg(TRANSPORT_CHANNEL, "Error in Transport.read: Socket %hhu doesn't exist\n", fd);
+            return 0;
+        }
+        else if (socket->state != ESTABLISHED) {
+            // The specified socket doesn't have a connection yet
+            // dbg(TRANSPORT_CHANNEL, "Error in Transport.read: Socket %hhu is not in ESTABLISHED state\n", fd);
+            return 0;
+        }
+
+        // Use lastRead/lastRcvd to calculate how much data to write to the buffer
+
+        return 0;
+    }
 
    /**
     * Attempts a connection to an address.

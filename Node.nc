@@ -42,7 +42,8 @@ module Node{
 
    //use the provided transport interface
    uses interface Transport as Transport; // handles sockets
-   uses interface Timer<TMilli> as TCPSendTimer;
+   uses interface Timer<TMilli> as TCPWriteTimer;
+   uses interface Timer<TMilli> as TCPReadTimer;
 }
 
 implementation{
@@ -385,11 +386,13 @@ implementation{
          dbg(TRANSPORT_CHANNEL,"Server: FAILED to bind address (%hhu) to socket (%hhu)\n", TOS_NODE_ID, fd);
       }
       //listen for connections from the socket
-      //will foce close any current connections in this socket
+      //will foce close any current connections in this socketsocket
       //listen will set a timer to fire Transport.accept() periodically to check for incoming connections
       if(call Transport.listen(fd) == SUCCESS){
          //modified socket state to listen
          dbg(TRANSPORT_CHANNEL, "Server: Listening at socket (%hhu)...\n", fd);
+         default_socket = fd;
+         call TCPReadTimer.startPeriodic(TCP_READ_TIMER);
       }else{
          dbg(TRANSPORT_CHANNEL, "Server: FAILED to switch socket(%hhu)'s state to LISTEN...\n", fd);
       }
@@ -407,19 +410,19 @@ implementation{
       destinationAddress.port = destinationPort;
 
       socket = call Transport.socket();
-      default_socket = socket;
 
       if (call Transport.bind(socket, &sourceAddress) == SUCCESS) {
          dbg(TRANSPORT_CHANNEL,"Client: SUCESSFULLY bounded address(%hhu) to socket (%hhu)\n", TOS_NODE_ID, socket);
          dbg(TRANSPORT_CHANNEL,"Client: Attempting connection from client(%hhu):port(%hhu) to server(%hhu):port(%hhu)...\n",
             TOS_NODE_ID, socket, destination, destinationPort);
          call Transport.connect(socket, &destinationAddress);
-         call TCPSendTimer.startPeriodic(TCP_SEND_TIMER);
+         default_socket = socket;
+         call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);
          numbersToTransfer = transfer;
       }
    }
 
-   event void TCPSendTimer.fired() {
+   event void TCPWriteTimer.fired() {
       // Create an array and fill it with numbers
       uint8_t buff[SOCKET_BUFFER_SIZE];
       uint16_t i, num, numbersToWrite;
@@ -441,8 +444,22 @@ implementation{
       }
 
       // Ask the Transport module to write as much as it can
-      i = call Transport.write(default_socket, &buff, numbersToWrite*2);
+      i = call Transport.write(default_socket, buff, numbersToWrite*2);
       numbersWrittenSoFar += i/2;
+   }
+
+   event void TCPReadTimer.fired() {
+      uint8_t buff[SOCKET_BUFFER_SIZE];
+      uint16_t i, num, numbersRead;
+
+      // Read the socket's buffer
+      numbersRead = call Transport.read(default_socket, buff, SOCKET_BUFFER_SIZE) / 2;
+
+      // Print out the numbers
+      for (i = 0; i < numbersRead; i++) {
+         memcpy(&buff[i*2], &num, 2);
+         dbg(TRANSPORT_CHANNEL, "Received number: %hhu\n", num);
+      }
    }
 
    event void CommandHandler.setAppServer(){}
