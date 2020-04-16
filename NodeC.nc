@@ -59,4 +59,7 @@ implementation {
 
     components TransportC;
     Node.Transport -> TransportC;
+
+    components new TimerMilliC() as TCPSendTimerC;
+    Node.TCPSendTimer -> TCPSendTimerC;
 }

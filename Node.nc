@@ -42,12 +42,16 @@ module Node{
 
    //use the provided transport interface
    uses interface Transport as Transport; // handles sockets
+   uses interface Timer<TMilli> as TCPSendTimer;
 }
 
 implementation{
    pack sendPackage;
    uint16_t currentSequence = 0;
-   //generate sockets
+
+   // TCP-related variables
+   socket_t default_socket = NULL_SOCKET;
+   uint16_t numbersToTransfer = 0, numbersWrittenSoFar = 0;
 
    // Prototypes
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
@@ -403,13 +407,42 @@ implementation{
       destinationAddress.port = destinationPort;
 
       socket = call Transport.socket();
+      default_socket = socket;
 
       if (call Transport.bind(socket, &sourceAddress) == SUCCESS) {
          dbg(TRANSPORT_CHANNEL,"Client: SUCESSFULLY bounded address(%hhu) to socket (%hhu)\n", TOS_NODE_ID, socket);
          dbg(TRANSPORT_CHANNEL,"Client: Attempting connection from client(%hhu):port(%hhu) to server(%hhu):port(%hhu)...\n",
             TOS_NODE_ID, socket, destination, destinationPort);
          call Transport.connect(socket, &destinationAddress);
+         call TCPSendTimer.startPeriodic(TCP_SEND_TIMER);
+         numbersToTransfer = transfer;
       }
+   }
+
+   event void TCPSendTimer.fired() {
+      // Create an array and fill it with numbers
+      uint8_t buff[SOCKET_BUFFER_SIZE];
+      uint16_t i, num, numbersToWrite;
+
+      numbersToWrite = numbersToTransfer - numbersWrittenSoFar;
+      if (numbersToWrite == 0) {
+         // All numbers have been written
+         return;
+      }
+      else if (numbersToWrite > SOCKET_BUFFER_SIZE/2) {
+         // Limit the amount of numbers written to the maximum space available
+         numbersToWrite = SOCKET_BUFFER_SIZE/2;
+      }
+
+      // Fill the array with numbers
+      for (i = 0; i < numbersToWrite; i++) {
+         num = numbersWrittenSoFar + i + 1;
+         memcpy(&buff[i*2], &num, 2);
+      }
+
+      // Ask the Transport module to write as much as it can
+      i = call Transport.write(default_socket, &buff, numbersToWrite*2);
+      numbersWrittenSoFar += i/2;
    }
 
    event void CommandHandler.setAppServer(){}

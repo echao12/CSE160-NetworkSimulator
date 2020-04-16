@@ -24,4 +24,5 @@ interface List<t>{
 	command bool isFull();
 	command uint16_t size();
 	command t get(uint16_t position);
+	command t* getPtr(uint16_t position);
 }

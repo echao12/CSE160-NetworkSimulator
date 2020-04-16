@@ -24,11 +24,14 @@ implementation{
    tcp_pack TCPPackage;
    socket_t curSocketNumber;
 
+   void makeOutstanding(pack Package, uint16_t timeoutValue);
+   void acknowledgePacket(pack *Package);
+
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
    void makeTCPPack(tcp_pack *Package, uint8_t srcPort, uint8_t destPort, uint16_t byteSeq, uint16_t acknowledgement, uint8_t flags, uint8_t advertisedWindow, uint8_t *payload, uint8_t length);
    void extractTCPPack(pack *Package, tcp_pack* TCPPack);
-   void makeOutstanding(pack Package, uint16_t timeoutValue);
-   void acknowledgePacket(pack *Package);
+
+   socket_store_t* getSocketPtr(socket_t fd);
 
    /**
     * Get a socket if there is one available.
@@ -121,7 +124,35 @@ implementation{
     * @return uint16_t - return the amount of data you are able to write
     *    from the pass buffer. This may be shorter then bufflen
     */
-   command uint16_t Transport.write(socket_t fd, uint8_t *buff, uint16_t bufflen){}
+   command uint16_t Transport.write(socket_t fd, uint8_t *buff, uint16_t bufflen){
+        socket_store_t* socket;
+        uint16_t i, num;
+        
+        // Get the specified socket
+        socket = getSocketPtr(fd);
+
+        if (socket == NULL) {
+            // The specified socket doesn't exist
+            // dbg(TRANSPORT_CHANNEL, "Error in Transport.write: Socket %hhu doesn't exist\n", fd);
+            return 0;
+        }
+        else if (socket->state != ESTABLISHED) {
+            // The specified socket doesn't have a connection yet
+            // dbg(TRANSPORT_CHANNEL, "Error in Transport.write: Socket %hhu is not in ESTABLISHED state\n", fd);
+            return 0;
+        }
+
+        // Use lastAck/lastWritten to calculate how much data to write to the buffer
+        // For now, just make sure all the numbers can get here correctly
+        dbg(TRANSPORT_CHANNEL, "Writing to sendBuff:\n");
+        for (i = 0; i < bufflen; i += 2) {
+            memcpy(&num, &buff[i], 2);
+            dbg(TRANSPORT_CHANNEL, "%hhu\n", num);
+        }
+        dbg(TRANSPORT_CHANNEL, "Finished writing\n");
+
+        return bufflen;
+   }
 
    /**
     * This will pass the packet so you can handle it internally. 
@@ -579,4 +610,18 @@ implementation{
    void extractTCPPack(pack *Package, tcp_pack *TCPPack) {
        memcpy(TCPPack, &Package->payload, PACKET_MAX_PAYLOAD_SIZE);
    }
+
+    socket_store_t* getSocketPtr(socket_t fd) {
+        // Return a pointer to the specified socket if it exists, return NULL otherwise
+        uint16_t i, numSockets;
+        socket_store_t* socket;
+
+        numSockets = call socketList.size();
+        for (i = 0; i < numSockets; i++) {
+            socket = call socketList.getPtr(i);
+            if (socket->fd == fd) {
+                return socket;
+            }
+        }
+    }
 }
