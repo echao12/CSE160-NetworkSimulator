@@ -26,12 +26,16 @@ def main():
 
     # Designate a node as the server
     s.testServer(1, 100);#mote,port
+    s.runTime(1);
+    s.testServer(1, 200);#mote,port
     s.runTime(60);
 
     # Designate a node as the client and begin transmission
     #srcMote,srcPort,destMote,destPort,transfer
     #note: client send val 0->transfer to server
     s.testClient(4, 200, 1, 100, 10);
+    s.runTime(1);
+    s.testClient(5, 100, 1, 200, 10);
     s.runTime(1);
     s.runTime(1000);
 

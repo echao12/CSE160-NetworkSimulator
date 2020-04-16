@@ -209,6 +209,8 @@ implementation{
                     acknowledgePacket(package);
                     makeOutstanding(sendPackage, RTT_ESTIMATE);
                     socket.state = ESTABLISHED;
+                    //adjust usedSocket value
+                    call usedSockets.set(socket.fd, 1);
                     dbg(TRANSPORT_CHANNEL, "\nSOCKET[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
                     socket.src.addr, socket.src.port, socket.dest.addr, socket.dest.port);
                     error = SUCCESS;
@@ -224,11 +226,12 @@ implementation{
                 socket.lastRcvd = TCPPackage.byteSeq;
                 socket.nextExpected = TCPPackage.byteSeq + 1;
                 socket.state = ESTABLISHED;  // Change state to ESTABLISHED no matter what
+                //adjust usedSocket Map value
+                call usedSockets.set(socket.fd, 1);//1 is established, 0 is not
                 dbg(TRANSPORT_CHANNEL, "\nSOCKET[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
                     socket.src.addr, socket.src.port, socket.dest.addr, socket.dest.port);
-                // TODO: Acknowledge the packet
                 acknowledgePacket(package);
-                
+                //Send effective window
             }
         }
         //ESTABLISHED
@@ -394,11 +397,12 @@ implementation{
             while(!found){
                     socket = call socketList.popfront();
                     if(socket.fd == fd){
-                        dbg(TRANSPORT_CHANNEL,"FOUND socket %hhu in socketList to close...\n", fd);
+                        dbg(TRANSPORT_CHANNEL,"FOUND socket %hhu in socketList.\n", fd);
                         found = TRUE;
+                    }else{
+                        //not it
+                        call socketList.pushback(socket);
                     }
-                    //not it
-                    call socketList.pushback(socket);
                 }
             //Found it, check for active connection and change states.
             //NOTE: 0 REFERS TO AN OPEN SOCKET, NOT A SOCKET WITH AN ESTABLISHED CONNECTION
