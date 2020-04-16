@@ -137,7 +137,7 @@ implementation{
        socket_store_t socket;
        error_t error = FAIL;
 
-        dbg(TRANSPORT_CHANNEL, "Transport Module: \nNODE(%hhu) RECIEVED TCP package:\n", TOS_NODE_ID);
+        dbg(TRANSPORT_CHANNEL, "Transport Module: \nNODE(%hhu) RECIEVED TCP Packet seq#(%hhu)\n", TOS_NODE_ID, package->seq);
         extractTCPPack(package, &TCPPackage);
         logTCPPack(&TCPPackage);
 
@@ -166,14 +166,15 @@ implementation{
             dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: LISTENING...\n");
             //check for a SYN msg
             if(checkFlagBit(&TCPPackage, SYN_FLAG_BIT)){
-                dbg(TRANSPORT_CHANNEL, "RECEIVED SYN PACKET\nREPLYING with SYN/ACK TCP Packet\n");
+                dbg(TRANSPORT_CHANNEL, "RECEIVED SYN PACKET(sender seq#: %hhu)\nREPLYING with SYN/ACK TCP Packet\n", package->seq);
                 //record packet source as this port's destination
                 socket.dest.addr = package->src;
                 socket.dest.port = TCPPackage.srcPort;
                 //record sequence#
                 socket.lastRcvd = TCPPackage.byteSeq;
                 socket.nextExpected = TCPPackage.byteSeq + 1;
-                //generate SYN packet with ack
+                //socket.nextExpected = TCPPackage.byteSeq + 1;
+                //generate SYN packet with ack, recall 4th argument is byteSeq;
                 makeTCPPack(&TCPPackage, socket.src.port, socket.dest.port, 0, socket.nextExpected, 0, 0, "SYN_REPLY", TCP_PACKET_MAX_PAYLOAD_SIZE);
                 setFlagBit(&TCPPackage, SYN_FLAG_BIT);
                 setFlagBit(&TCPPackage, ACK_FLAG_BIT);
@@ -183,27 +184,33 @@ implementation{
                 if (signal Transport.send(&sendPackage) == SUCCESS) {
                     makeOutstanding(sendPackage, RTT_ESTIMATE);
                     socket.state = SYN_RCVD;
+                    socket.lastSent = TCPPackage.byteSeq;//not too sure yet.
                     error = SUCCESS;
                 }
             }
         }
-        //SYN_SENT
+        //STATE: SYN_SENT, check to see if we got syn/ack packet.
         else if (socket.state == SYN_SENT) {
             dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: SYN_SENT\n");
             // Check for SYN+ACK packet
             if (checkFlagBit(&TCPPackage, SYN_FLAG_BIT) && checkFlagBit(&TCPPackage, ACK_FLAG_BIT)) {
+                //the packet's ACK value is the expecting value
                 dbg(TRANSPORT_CHANNEL, "RECEIVED SYN+ACK PACKET\nREPLYING with ACK TCP Packet\n");
-                socket.lastAck = TCPPackage.acknowledgement - 1;
-                // Make ACK packet
-                makeTCPPack(&TCPPackage, socket.src.port, socket.dest.port, socket.lastSent+1, TCPPackage.byteSeq+1, 0, 0, "ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                socket.lastAck = TCPPackage.acknowledgement - 1;//(NOT SURE ABOUT THIS YET) i think it should be the packet's ack #
+                socket.nextExpected = TCPPackage.byteSeq + 1;
+                // Make ACK packet with reciever's byteSeq+1 val
+                makeTCPPack(&TCPPackage, socket.src.port, socket.dest.port, socket.lastSent+1, socket.nextExpected, 0, 0, "ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
                 setFlagBit(&TCPPackage, ACK_FLAG_BIT);
                 makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
                 memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
-
                 if (signal Transport.send(&sendPackage) == SUCCESS) {
+                    //update sender socket values
+                    socket.lastSent++;
                     acknowledgePacket(package);
                     makeOutstanding(sendPackage, RTT_ESTIMATE);
                     socket.state = ESTABLISHED;
+                    dbg(TRANSPORT_CHANNEL, "\nSOCKET[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
+                    socket.src.addr, socket.src.port, socket.dest.addr, socket.dest.port);
                     error = SUCCESS;
                 }
             }
@@ -211,15 +218,17 @@ implementation{
         //SYN_RCVD
         else if (socket.state == SYN_RCVD) {
             dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: SYN_RCVD\n");
-            // Check for any ACK packet
+            // Check for any ACK packet with proper seq#
             if (checkFlagBit(&TCPPackage, ACK_FLAG_BIT)) {
                 dbg(TRANSPORT_CHANNEL, "RECEIVED ACK PACKET\n");
                 socket.lastRcvd = TCPPackage.byteSeq;
                 socket.nextExpected = TCPPackage.byteSeq + 1;
                 socket.state = ESTABLISHED;  // Change state to ESTABLISHED no matter what
-                
+                dbg(TRANSPORT_CHANNEL, "\nSOCKET[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
+                    socket.src.addr, socket.src.port, socket.dest.addr, socket.dest.port);
                 // TODO: Acknowledge the packet
                 acknowledgePacket(package);
+                
             }
         }
         //ESTABLISHED
@@ -231,6 +240,8 @@ implementation{
             }
             else if (checkFlagBit(&TCPPackage, ACK_FLAG_BIT)) {
                 // TODO: Do something with the packet
+            }else if(TCPPackage.flags == 0){
+
             }
         }
         //CLOSED
@@ -507,7 +518,7 @@ implementation{
                     extractTCPPack(&sentPack, &sentTCP);
                     if (sentTCP.srcPort == ackTCP.destPort && sentTCP.destPort && ackTCP.srcPort) {
                         if (sentTCP.byteSeq < ackTCP.acknowledgement && sentTCP.byteSeq + TCP_PACKET_MAX_PAYLOAD_SIZE + 1 >= ackTCP.acknowledgement) {
-                            // Found a match, remove it from the list (not sure if this is correct)
+                            // Found a match, remove it from the list (not sure if this is correct) REPLY: I think you're fine.
                             // dbg(TRANSPORT_CHANNEL, "Outstanding packet removed\n");
                             continue;
                         }

@@ -417,8 +417,11 @@ implementation{
    event void CommandHandler.setAppClient(){}
 
    event error_t Transport.send(pack* package){
+      //update the packet seq number
+      package->seq = currentSequence + 1;
       dbg(TRANSPORT_CHANNEL, "Sending packet from (%hhu) to (%hhu)\n", package->src, package->dest);
       call packetsQueue.pushback(*package);
+      incrementSequence();
       return SUCCESS;
    }
 
@@ -429,6 +432,7 @@ implementation{
       Package->seq = seq;
       Package->protocol = protocol;
       memcpy(Package->payload, payload, length);
+      incrementSequence();//dont forget to increment sequence.
    }
 
    bool checkCache(pack *Package) {

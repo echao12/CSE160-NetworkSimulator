@@ -12,6 +12,7 @@
 #define MAX_CACHE_SIZE 10
 #define MAX_PACKETS_QUEUE_SIZE 255
 
+
 enum{
 	PACKET_HEADER_LENGTH = 8,
 	PACKET_MAX_PAYLOAD_SIZE = 28 - PACKET_HEADER_LENGTH,
@@ -41,8 +42,8 @@ enum{
 typedef nx_struct tcp_pack{
 	nx_uint8_t srcPort;
 	nx_uint8_t destPort;
-	nx_uint16_t byteSeq;
-	nx_uint16_t acknowledgement;
+	nx_uint16_t byteSeq;//holds packet order
+	nx_uint16_t acknowledgement;//holds expecting value for next packet recieved
 	nx_uint8_t flags;
 	nx_uint8_t advertisedWindow;
 	nx_uint8_t payload[TCP_PACKET_MAX_PAYLOAD_SIZE];
