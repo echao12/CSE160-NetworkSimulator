@@ -13,6 +13,7 @@ module TransportP{
 
    // track outstanding packets
    uses interface List<pack> as outstandingPackets;
+   uses interface List<uint32_t> as timeToResend;
    uses interface Timer<TMilli> as resendTimer;
 }
 
@@ -26,6 +27,7 @@ implementation{
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
    void makeTCPPack(tcp_pack *Package, uint8_t srcPort, uint8_t destPort, uint16_t byteSeq, uint16_t acknowledgement, uint8_t flags, uint8_t advertisedWindow, uint8_t *payload, uint8_t length);
    void extractTCPPack(pack *Package, tcp_pack* TCPPack);
+   void makeOutstanding(pack Package, uint16_t timeoutValue);
    void acknowledgePacket(pack *Package);
 
    /**
@@ -82,7 +84,7 @@ implementation{
             call socketList.pushback(socketConfig);//adding it to this node's socketlist
             dbg(TRANSPORT_CHANNEL, "SUCESSFULLY BOUNDED!\n");
             error = SUCCESS;
-            call resendTimer.startPeriodic(RTT_ESTIMATE);
+            call resendTimer.startOneShotAt(call resendTimer.getNow(), RTT_ESTIMATE);
        }else{
             dbg(TRANSPORT_CHANNEL, "FAILED TO BIND!\n");
             error = FAIL;
@@ -179,7 +181,7 @@ implementation{
                 memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
                 
                 if (signal Transport.send(&sendPackage) == SUCCESS) {
-                    call outstandingPackets.pushback(sendPackage);
+                    makeOutstanding(sendPackage, RTT_ESTIMATE);
                     socket.state = SYN_RCVD;
                     error = SUCCESS;
                 }
@@ -200,7 +202,7 @@ implementation{
 
                 if (signal Transport.send(&sendPackage) == SUCCESS) {
                     acknowledgePacket(package);
-                    call outstandingPackets.pushback(sendPackage);
+                    makeOutstanding(sendPackage, RTT_ESTIMATE);
                     socket.state = ESTABLISHED;
                     error = SUCCESS;
                 }
@@ -304,7 +306,7 @@ implementation{
                dbg(TRANSPORT_CHANNEL,"CLIENT[%hhu][%hhu]: Sending a SYN packet to Server[%hhu][%hhu]...\n",
                     socket.src.addr, socket.src.port, socket.dest.addr, socket.dest.port);
                if (signal Transport.send(&sendPackage) == SUCCESS) {
-                   call outstandingPackets.pushback(sendPackage);
+                   makeOutstanding(sendPackage, RTT_ESTIMATE);
                    socket.state = SYN_SENT;
                    socket.lastSent = 0;
                    //push socket back into list
@@ -322,7 +324,7 @@ implementation{
                    makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
                    memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
                    if (signal Transport.send(&sendPackage) == SUCCESS) {
-                       call outstandingPackets.pushback(sendPackage);
+                       makeOutstanding(sendPackage, RTT_ESTIMATE);
                        error = SUCCESS;
                    }
                }
@@ -402,7 +404,7 @@ implementation{
             dbg(TRANSPORT_CHANNEL, "Changed socket state to LISTEN(%hhu)\n", socket.state);
            dbg(TRANSPORT_CHANNEL,"Starting timer to listen for connections...\n");
            listenFd = fd;
-           //will check for connection to accept every 5 seconds
+           //will check for connection to accept every 5 sSending packet fromeconds
            call listenTimer.startPeriodic(5000);
            error = SUCCESS;
            return error;
@@ -448,40 +450,75 @@ implementation{
        }
    }
 
-   event void resendTimer.fired() {
-       // When this timer fires, just resend all outstanding packets
-       pack packet;
-       uint16_t i, numOutstanding = call outstandingPackets.size();
-       for (i = 0; i < numOutstanding; i++) {
-           packet = call outstandingPackets.get(i);
-           signal Transport.send(&packet);
-       }
-   }
+    event void resendTimer.fired() {
+        // When this timer fires, resend the earliest outstanding packet
+        pack packet, nextPacket;
+        uint32_t t0, t1, t2;
 
-   void acknowledgePacket(pack* ackPack) {
-       // Try to match the ACK packet with an outstanding packet and remove that outstanding packet from the list
-       pack sentPack;
-       tcp_pack sentTCP, ackTCP;
-       uint16_t i, numOutstanding = call outstandingPackets.size();
-       extractTCPPack(ackPack, &ackTCP);
-       if (checkFlagBit(&ackTCP, ACK_FLAG_BIT)) {
-           for (i = 0; i < numOutstanding; i++) {
-               sentPack = call outstandingPackets.popfront();
-               if (sentPack.src == ackPack->dest && sentPack.dest == ackPack->src) {
-                   extractTCPPack(&sentPack, &sentTCP);
-                   if (sentTCP.srcPort == ackTCP.destPort && sentTCP.destPort && ackTCP.srcPort) {
-                       if (sentTCP.byteSeq < ackTCP.acknowledgement && sentTCP.byteSeq + TCP_PACKET_MAX_PAYLOAD_SIZE + 1 >= ackTCP.acknowledgement) {
-                           // Found a match (not sure if this is correct)
-                           dbg(TRANSPORT_CHANNEL, "Outstanding packet removed\n");
-                           break;
-                       }
-                   }
-               }
-               // The packet doesn't match, return it to the list
-               call outstandingPackets.pushback(sentPack);
-           }
-       }
-   }
+        t0 = call resendTimer.getNow();
+
+        if (call outstandingPackets.isEmpty()) {
+            // Nothing to retransmit, just reset the timer
+            call resendTimer.startOneShotAt(t0, RTT_ESTIMATE);
+            return;
+        }
+        
+        packet = call outstandingPackets.popfront();
+        t1 = call timeToResend.popfront();
+
+        if (t0 < t1) {
+            // There is something to retransmit but now is not the time
+            // Reset the timer accordingly
+            call resendTimer.startOneShotAt(t0, t1 - t0);
+            return;
+        }
+
+        // Resend the packet
+        signal Transport.send(&packet);
+        
+        // Push it to the back of the list
+        call outstandingPackets.pushback(packet);
+        call timeToResend.pushback(call resendTimer.getNow() + RTT_ESTIMATE);
+
+        // Calculate time until the next packet times out
+        nextPacket = call outstandingPackets.front();
+        t2 = call timeToResend.front();
+
+        call resendTimer.startOneShotAt(t1, t2 - t1);
+    }
+
+    void makeOutstanding(pack Package, uint16_t timeoutValue) {
+        call outstandingPackets.pushback(Package);
+        call timeToResend.pushback(call resendTimer.getNow() + timeoutValue);
+    }
+
+    void acknowledgePacket(pack* ackPack) {
+        // Try to match the ACK packet with an outstanding packet and remove that outstanding packet from the list
+        pack sentPack;
+        tcp_pack sentTCP, ackTCP;
+        uint32_t t;
+        uint16_t i, numOutstanding = call outstandingPackets.size();
+        extractTCPPack(ackPack, &ackTCP);
+        if (checkFlagBit(&ackTCP, ACK_FLAG_BIT)) {
+            for (i = 0; i < numOutstanding; i++) {
+                sentPack = call outstandingPackets.popfront();
+                t = call timeToResend.popfront();
+                if (sentPack.src == ackPack->dest && sentPack.dest == ackPack->src) {
+                    extractTCPPack(&sentPack, &sentTCP);
+                    if (sentTCP.srcPort == ackTCP.destPort && sentTCP.destPort && ackTCP.srcPort) {
+                        if (sentTCP.byteSeq < ackTCP.acknowledgement && sentTCP.byteSeq + TCP_PACKET_MAX_PAYLOAD_SIZE + 1 >= ackTCP.acknowledgement) {
+                            // Found a match, remove it from the list (not sure if this is correct)
+                            // dbg(TRANSPORT_CHANNEL, "Outstanding packet removed\n");
+                            continue;
+                        }
+                    }
+                }
+                // The packet doesn't match, return it to the list
+                call outstandingPackets.pushback(sentPack);
+                call timeToResend.pushback(t);
+            }
+        }
+    }
 
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t protocol, uint16_t seq, uint8_t* payload, uint8_t length){
       Package->src = src;

@@ -26,6 +26,9 @@ implementation{
     components new ListC(pack, SOCKET_BUFFER_SIZE) as outstandingPacketsC;
     TransportP.outstandingPackets -> outstandingPacketsC;
 
+    components new ListC(uint32_t, SOCKET_BUFFER_SIZE) as timeToResendC;
+    TransportP.timeToResend -> timeToResendC;
+
     components new TimerMilliC() as resendTimerC;
     TransportP.resendTimer -> resendTimerC;
 }
