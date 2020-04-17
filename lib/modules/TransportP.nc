@@ -14,6 +14,7 @@ module TransportP{
    uses interface List<pack> as outstandingPackets;
    uses interface List<uint32_t> as timeToResend;
    uses interface Timer<TMilli> as resendTimer;
+   uses interface List<uint16_t> as resendAttempts;
 }
 
 
@@ -455,8 +456,9 @@ implementation{
 
     event void resendTimer.fired() {
         // When this timer fires, resend the earliest outstanding packet
-        pack packet, nextPacket;
+        pack packet;
         uint32_t t0, t1, t2;
+        uint16_t attempt;
 
         t0 = call resendTimer.getNow();
 
@@ -465,9 +467,8 @@ implementation{
             call resendTimer.startOneShotAt(t0, RTT_ESTIMATE);
             return;
         }
-        
-        packet = call outstandingPackets.popfront();
-        t1 = call timeToResend.popfront();
+
+        t1 = call timeToResend.front();
 
         if (t0 < t1) {
             // There is something to retransmit but now is not the time
@@ -476,23 +477,38 @@ implementation{
             return;
         }
 
+        packet = call outstandingPackets.popfront();
+        t1 = call timeToResend.popfront();
+        attempt = call resendAttempts.popfront();
+
         // Resend the packet
         signal Transport.send(&packet);
+        attempt += 1;
         
-        // Push it to the back of the list
-        call outstandingPackets.pushback(packet);
-        call timeToResend.pushback(call resendTimer.getNow() + RTT_ESTIMATE);
-
+        if (attempt < MAX_RESEND_ATTEMPTS) {
+            // Push it to the back of the list
+            call outstandingPackets.pushback(packet);
+            call timeToResend.pushback(t1 + RTT_ESTIMATE);
+            call resendAttempts.pushback(attempt);
+        }
+        else {
+            dbg(TRANSPORT_CHANNEL, "Maximum retransmission attempts reached, packet is dropped\n");
+        }
+        
         // Calculate time until the next packet times out
-        nextPacket = call outstandingPackets.front();
-        t2 = call timeToResend.front();
-
+        if (call outstandingPackets.isEmpty()) {
+            t2 = t0 + RTT_ESTIMATE;
+        }
+        else {
+            t2 = call timeToResend.front();
+        }
         call resendTimer.startOneShotAt(t1, t2 - t1);
     }
 
     void makeOutstanding(pack Package, uint16_t timeoutValue) {
         call outstandingPackets.pushback(Package);
         call timeToResend.pushback(call resendTimer.getNow() + timeoutValue);
+        call resendAttempts.pushback(0);
     }
 
     void acknowledgePacket(pack* ackPack) {
@@ -500,17 +516,17 @@ implementation{
         pack sentPack;
         tcp_pack sentTCP, ackTCP;
         uint32_t t;
-        uint16_t i, numOutstanding = call outstandingPackets.size();
+        uint16_t i, attempt, numOutstanding = call outstandingPackets.size();
         extractTCPPack(ackPack, &ackTCP);
         if (checkFlagBit(&ackTCP, ACK_FLAG_BIT)) {
             for (i = 0; i < numOutstanding; i++) {
                 sentPack = call outstandingPackets.popfront();
                 t = call timeToResend.popfront();
+                attempt = call resendAttempts.popfront();
                 if (sentPack.src == ackPack->dest && sentPack.dest == ackPack->src) {
                     extractTCPPack(&sentPack, &sentTCP);
                     if (sentTCP.srcPort == ackTCP.destPort && sentTCP.destPort && ackTCP.srcPort) {
                         if (sentTCP.byteSeq < ackTCP.acknowledgement && sentTCP.byteSeq + TCP_PACKET_MAX_PAYLOAD_SIZE + 1 >= ackTCP.acknowledgement) {
-                            // Found a match, remove it from the list (not sure if this is correct) REPLY: I think you're fine.
                             // dbg(TRANSPORT_CHANNEL, "Outstanding packet removed\n");
                             continue;
                         }
@@ -519,6 +535,7 @@ implementation{
                 // The packet doesn't match, return it to the list
                 call outstandingPackets.pushback(sentPack);
                 call timeToResend.pushback(t);
+                call resendAttempts.pushback(attempt);
             }
         }
     }

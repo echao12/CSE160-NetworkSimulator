@@ -9,7 +9,7 @@ configuration TransportC{
 implementation{
     components TransportP;
     Transport = TransportP;
-    
+
     components RandomC as Random;
     TransportP.Random -> Random;
     
@@ -20,12 +20,15 @@ implementation{
     components new HashmapC(socket_t, MAX_NUM_OF_SOCKETS) as map;
     TransportP.usedSockets -> map;
 
-    components new ListC(pack, SOCKET_BUFFER_SIZE) as outstandingPacketsC;
+    components new ListC(pack, MAX_OUTSTANDING) as outstandingPacketsC;
     TransportP.outstandingPackets -> outstandingPacketsC;
 
-    components new ListC(uint32_t, SOCKET_BUFFER_SIZE) as timeToResendC;
+    components new ListC(uint32_t, MAX_OUTSTANDING) as timeToResendC;
     TransportP.timeToResend -> timeToResendC;
 
     components new TimerMilliC() as resendTimerC;
     TransportP.resendTimer -> resendTimerC;
+
+    components new ListC(uint16_t, MAX_OUTSTANDING) as resendAttemptsC;
+    TransportP.resendAttempts -> resendAttemptsC;
 }
