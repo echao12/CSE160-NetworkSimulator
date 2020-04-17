@@ -161,126 +161,123 @@ implementation{
     * @return uint16_t - return SUCCESS if you are able to handle this
     *    packet or FAIL if there are errors.
     */
-   command error_t Transport.receive(pack* package){
-       bool found = FALSE;
-       int numAttempts = 0;
-       socket_store_t socket;
-       error_t error = FAIL;
-       uint8_t windowSize = 1;
+    command error_t Transport.receive(pack* package){
+        socket_store_t* socket = NULL;
+        uint16_t i, numSockets;
+        error_t error;
+        uint8_t windowSize = 1;
 
         dbg(TRANSPORT_CHANNEL, "Transport Module: \nNODE(%hhu) RECIEVED TCP Packet seq#(%hhu)\n", TOS_NODE_ID, package->seq);
         extractTCPPack(package, &TCPPackage);
         logTCPPack(&TCPPackage);
 
-        //find the socket info
-        while(found == FALSE && numAttempts < MAX_NUM_OF_SOCKETS){
-            socket = call socketList.popfront();
-            //dbg(TRANSPORT_CHANNEL,"CHECKING SOCKET VALUES:\nsocketAddr:%hhu, pkgDest:%hhu\nsocketPort:%hhu, pkgPort:%hhu\n",
-            //socket.src.addr, package->dest, socket.src.port, TCPPackage.destPort);
-            if(socket.src.addr == package->dest && socket.src.port == TCPPackage.destPort){
-                dbg(TRANSPORT_CHANNEL,"FOUND SOCKET\n");
-                found = TRUE;
-            }else{
-                call socketList.pushback(socket);
-                numAttempts++;
+        // Check if this packet is intended for one of the sockets
+        numSockets = call socketList.size();
+        for (i = 0; i < numSockets; i++) {
+            socket = call socketList.getPtr(i);
+            if (socket->src.addr == package->dest && socket->src.port == TCPPackage.destPort) {
+                dbg(TRANSPORT_CHANNEL, "FOUND SOCKET\n");
+                break;
+            }
+            else {
+                socket = NULL;
             }
         }
 
-        if (!found) {
+        if (socket == NULL) {
             dbg(TRANSPORT_CHANNEL, "FAILED: Could not find corresponding socket for the packet.\n*DROPPED TCP PACKET!*\n");
             return FAIL;
         }
 
-        dbg(TRANSPORT_CHANNEL, "Checking socket state...(STATE:%hhu)\n", socket.state);
+        dbg(TRANSPORT_CHANNEL, "Checking socket state...(STATE:%hhu)\n", socket->state);
         //LISTEN
-        if(socket.state == LISTEN){
+        if(socket->state == LISTEN){
             dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: LISTENING...\n");
             //check for a SYN msg
             if(checkFlagBit(&TCPPackage, SYN_FLAG_BIT)){
                 dbg(TRANSPORT_CHANNEL, "RECEIVED SYN PACKET(sender seq#: %hhu)\nREPLYING with SYN/ACK TCP Packet\n", package->seq);
                 //record packet source as this port's destination
-                socket.dest.addr = package->src;
-                socket.dest.port = TCPPackage.srcPort;
+                socket->dest.addr = package->src;
+                socket->dest.port = TCPPackage.srcPort;
                 //record sequence#
-                socket.lastRcvd = TCPPackage.byteSeq;
-                socket.nextExpected = TCPPackage.byteSeq + 1;
-                //socket.nextExpected = TCPPackage.byteSeq + 1;
+                socket->lastRcvd = TCPPackage.byteSeq;
+                socket->nextExpected = TCPPackage.byteSeq + 1;
                 //generate SYN packet with ack, recall 4th argument is byteSeq;
-                makeTCPPack(&TCPPackage, socket.src.port, socket.dest.port, 0, socket.nextExpected, 0, 0, "SYN_REPLY", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, 0, socket->nextExpected, 0, 0, "SYN_REPLY", TCP_PACKET_MAX_PAYLOAD_SIZE);
                 setFlagBit(&TCPPackage, SYN_FLAG_BIT);
                 setFlagBit(&TCPPackage, ACK_FLAG_BIT);
-                makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+                makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
                 memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
                 
                 if (signal Transport.send(&sendPackage) == SUCCESS) {
                     makeOutstanding(sendPackage, RTT_ESTIMATE);
-                    socket.state = SYN_RCVD;
-                    socket.lastSent = TCPPackage.byteSeq;//not too sure yet.
+                    socket->state = SYN_RCVD;
+                    socket->lastSent = TCPPackage.byteSeq;//not too sure yet.
                     error = SUCCESS;
                 }
             }
         }
         //STATE: SYN_SENT, check to see if we got syn/ack packet.
-        else if (socket.state == SYN_SENT) {
+        else if (socket->state == SYN_SENT) {
             dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: SYN_SENT\n");
             // Check for SYN+ACK packet
             if (checkFlagBit(&TCPPackage, SYN_FLAG_BIT) && checkFlagBit(&TCPPackage, ACK_FLAG_BIT)) {
                 //the packet's ACK value is the expecting value
                 dbg(TRANSPORT_CHANNEL, "RECEIVED SYN+ACK PACKET\nREPLYING with ACK TCP Packet\n");
-                socket.lastAck = TCPPackage.acknowledgement - 1;//(NOT SURE ABOUT THIS YET) i think it should be the packet's ack #
-                socket.nextExpected = TCPPackage.byteSeq + 1;
+                socket->lastAck = TCPPackage.acknowledgement - 1;//(NOT SURE ABOUT THIS YET) i think it should be the packet's ack #
+                socket->nextExpected = TCPPackage.byteSeq + 1;
                 // Make ACK packet with reciever's byteSeq+1 val
-                makeTCPPack(&TCPPackage, socket.src.port, socket.dest.port, socket.lastSent+1, socket.nextExpected, 0, 0, "ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, socket->lastSent+1, socket->nextExpected, 0, 0, "ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
                 setFlagBit(&TCPPackage, ACK_FLAG_BIT);
-                makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+                makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
                 memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
                 if (signal Transport.send(&sendPackage) == SUCCESS) {
                     //update sender socket values
-                    socket.lastSent++;
+                    socket->lastSent++;
                     acknowledgePacket(package);
                     makeOutstanding(sendPackage, RTT_ESTIMATE);
-                    socket.state = ESTABLISHED;
+                    socket->state = ESTABLISHED;
                     //adjust usedSocket value
-                    call usedSockets.set(socket.fd, 1);
+                    call usedSockets.set(socket->fd, 1);
                     dbg(TRANSPORT_CHANNEL, "\nSOCKET[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
-                    socket.src.addr, socket.src.port, socket.dest.addr, socket.dest.port);
+                    socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
                     error = SUCCESS;
                 }
             }
         }
         //SYN_RCVD
-        else if (socket.state == SYN_RCVD) {
+        else if (socket->state == SYN_RCVD) {
             dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: SYN_RCVD\n");
             // Check for any ACK packet with proper seq#
             if (checkFlagBit(&TCPPackage, ACK_FLAG_BIT)) {
                 dbg(TRANSPORT_CHANNEL, "RECEIVED ACK PACKET\n");
-                socket.lastRcvd = TCPPackage.byteSeq;
-                socket.nextExpected = TCPPackage.byteSeq + 1;
-                socket.state = ESTABLISHED;  // Change state to ESTABLISHED no matter what
+                socket->lastRcvd = TCPPackage.byteSeq;
+                socket->nextExpected = TCPPackage.byteSeq + 1;
+                socket->state = ESTABLISHED;  // Change state to ESTABLISHED no matter what
                 //adjust usedSocket Map value
-                call usedSockets.set(socket.fd, 1);//1 is established, 0 is not
+                call usedSockets.set(socket->fd, 1);//1 is established, 0 is not
                 dbg(TRANSPORT_CHANNEL, "\nSOCKET[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
-                    socket.src.addr, socket.src.port, socket.dest.addr, socket.dest.port);
+                    socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
                 acknowledgePacket(package);
                 //Send effective window
                 //Send effective window to client
                 dbg(TRANSPORT_CHANNEL, "Sending effective window size (%hhu)\n", windowSize);
-                makeTCPPack(&TCPPackage, socket.src.port, socket.dest.port, socket.lastSent+1, socket.nextExpected, 0, windowSize, "Windowing...", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, socket->lastSent+1, socket->nextExpected, 0, windowSize, "Windowing...", TCP_PACKET_MAX_PAYLOAD_SIZE);
                 TCPPackage.flags = 0;//reset flags
                 setFlagBit(&TCPPackage, ACK_FLAG_BIT);
-                makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+                makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
                 memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
                 if(signal Transport.send(&sendPackage) == SUCCESS){
                     makeOutstanding(sendPackage, RTT_ESTIMATE);
-                    socket.lastSent++;
+                    socket->lastSent++;
                 }
             }
         }
         //ESTABLISHED
-        else if (socket.state == ESTABLISHED) {
+        else if (socket->state == ESTABLISHED) {
             //received a packet, update info
-            socket.lastRcvd = TCPPackage.byteSeq;
-            socket.nextExpected = TCPPackage.byteSeq + 1;
+            socket->lastRcvd = TCPPackage.byteSeq;
+            socket->nextExpected = TCPPackage.byteSeq + 1;
             acknowledgePacket(package);//packet received
             dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: ESTABLISHED\n");
             // Drop any SYN packet
@@ -290,9 +287,9 @@ implementation{
             else if (checkFlagBit(&TCPPackage, ACK_FLAG_BIT)) {
                 dbg(TRANSPORT_CHANNEL, "Recieved ACK Packet.\t");
                 dbg(TRANSPORT_CHANNEL, "AdvertiseWindow size(%hhu)\n", TCPPackage.advertisedWindow);
-                if(TCPPackage.advertisedWindow != socket.effectiveWindow){
-                    dbg(TRANSPORT_CHANNEL,"Adjusted effectiveWindow(%hhu) to match advertisedWindow(%hhu)...\n", socket.effectiveWindow, TCPPackage.advertisedWindow);
-                    socket.effectiveWindow = TCPPackage.advertisedWindow;
+                if(TCPPackage.advertisedWindow != socket->effectiveWindow){
+                    dbg(TRANSPORT_CHANNEL,"Adjusted effectiveWindow(%hhu) to match advertisedWindow(%hhu)...\n", socket->effectiveWindow, TCPPackage.advertisedWindow);
+                    socket->effectiveWindow = TCPPackage.advertisedWindow;
                 }
 
             }else if(TCPPackage.flags == 0){
@@ -300,15 +297,13 @@ implementation{
             }
         }
         //CLOSED
-        else if (socket.state == CLOSED) {
+        else if (socket->state == CLOSED) {
             // This socket is not open to communication, so do nothing
             dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: CLOSED\n");
         }
 
-        //push socket back into list
-        call socketList.pushfront(socket);
         return error;
-   }
+    }
 
    /**
     * Read from the socket and write this data to the buffer. This data
