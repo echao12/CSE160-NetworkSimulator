@@ -29,6 +29,7 @@ implementation{
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
    void makeTCPPack(tcp_pack *Package, uint8_t srcPort, uint8_t destPort, uint16_t byteSeq, uint16_t acknowledgement, uint8_t flags, uint8_t advertisedWindow, uint8_t *payload, uint8_t length);
    void extractTCPPack(pack *Package, tcp_pack* TCPPack);
+   void removeSocketFromList(socket_t fd);
 
    socket_store_t* getSocketPtr(socket_t fd);
 
@@ -329,11 +330,108 @@ implementation{
                 }
 
             }else if(checkFlagBit(&TCPPackage, FIN_FLAG_BIT)){
+                //signal server that client wants to close connection
                 dbg(TRANSPORT_CHANNEL, "Recieved FIN Packet.\nLink: [%hhu][%hhu]<----->[%hhu][%hhu]\nSTARTING DISCONNECTION...\n",
                 socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
                 acknowledgePacket(package);//packet received
-            }else if(TCPPackage.flags == 0){
 
+                //send CLOSE_WAIT packet to ack the FIN
+                makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, socket->lastSent+1, socket->nextExpected, 0, 0, "FIN ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                TCPPackage.flags = 0;//reset flags
+                //setFlagBit(&TCPPackage, FIN_FLAG_BIT);
+                setFlagBit(&TCPPackage, ACK_FLAG_BIT);
+                makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+                memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+                if(signal Transport.send(&sendPackage) == SUCCESS){
+                    dbg(TRANSPORT_CHANNEL, "Server:[%hhu][%hhu]Sending FIN_ACK to client[%hhu][%hhu]...\n",
+                    socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
+                    socket->state = CLOSE_WAIT;
+                    dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: CLOSE_WAIT\n");
+                    //makeOutstanding(sendPackage, RTT_ESTIMATE); //for FIN_ACKs, we dont needa recieve an ack back. dont add to outstanding
+                    socket->lastSent++;
+                    error = SUCCESS;
+                }
+
+                //send FIN back to the client
+                makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, socket->lastSent+1, socket->nextExpected, 0, 0, "FIN_LAST_ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                TCPPackage.flags = 0;//reset flags
+                setFlagBit(&TCPPackage, FIN_FLAG_BIT);
+                makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+                memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+                if(signal Transport.send(&sendPackage) == SUCCESS){
+                    dbg(TRANSPORT_CHANNEL, "Server:[%hhu][%hhu]Sending LAST_ACK to client[%hhu][%hhu]...\n",
+                    socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
+                    socket->state = LAST_ACK;
+                    dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: LAST_ACK\n");
+                    makeOutstanding(sendPackage, RTT_ESTIMATE);
+                    socket->lastSent++;
+                    error = SUCCESS;
+                }
+
+
+            }else if(TCPPackage.flags == 0){
+                //not sure yet
+            }
+        }else if(socket->state == FIN_WAIT_1){
+            dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: FIN_WAIT_1\n");
+            //update socket data
+            socket->lastRcvd = TCPPackage.byteSeq;
+            socket->nextExpected = TCPPackage.byteSeq + 1;
+            //checking for FIN/ACK packet
+            if(checkFlagBit(&TCPPackage, ACK_FLAG_BIT)){
+                dbg(TRANSPORT_CHANNEL,"RECIEVED FIN/ACK!\n");
+                //waiting for LAST_ACK from server.
+                socket->state = FIN_WAIT_2;
+                //acknowledgePacket(package);
+            }
+            //send 
+        }else if(socket->state == FIN_WAIT_2){
+            dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: FIN_WAIT_2\n");
+            //update socket data
+            socket->lastRcvd = TCPPackage.byteSeq;
+            socket->nextExpected = TCPPackage.byteSeq + 1;
+            if(checkFlagBit(&TCPPackage, FIN_FLAG_BIT)){
+                dbg(TRANSPORT_CHANNEL,"RECIEVED FIN!\n");
+                acknowledgePacket(package);
+                //send ACK back
+                makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, socket->lastSent+1, socket->nextExpected, 0, 0, "FIN_REPLY_LAST_ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                TCPPackage.flags = 0;//reset flags
+                setFlagBit(&TCPPackage, ACK_FLAG_BIT);
+                makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+                memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+                if(signal Transport.send(&sendPackage) == SUCCESS){
+                    socket->state = TIME_WAIT;
+                    dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: TIME_WAIT\n");
+                    makeOutstanding(sendPackage, RTT_ESTIMATE);//will retransmit, but we wait for a timeout anyways
+                    socket->lastSent++;
+                    error = SUCCESS;
+                }
+                socket->state = CLOSED;
+                dbg(TRANSPORT_CHANNEL,"\n**SOCKET[%hhu][%hhu] IS CLOSED**\n",socket->src.addr, socket->src.port);
+                //remove from usedSockets and socketList.
+                call usedSockets.remove(socket->fd);
+                removeSocketFromList(socket->fd);
+                dbg(TRANSPORT_CHANNEL, "Mote(%hhu): Socket is removed from socketList and usedSockets...\n", TOS_NODE_ID);
+
+            }
+
+        }else if(socket->state == LAST_ACK){
+            dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: LAST_ACK\n");
+            //check for an ack packet
+            socket->lastRcvd = TCPPackage.byteSeq;
+            socket->nextExpected = TCPPackage.byteSeq + 1;
+            if(checkFlagBit(&TCPPackage, ACK_FLAG_BIT)){
+                dbg(TRANSPORT_CHANNEL, "RECIEVED AN ACK!\nClosing the connection...");
+                acknowledgePacket(package);
+                //close the connection
+                socket->state = CLOSED;
+                dbg(TRANSPORT_CHANNEL,"\n**SOCKET[%hhu][%hhu] IS CLOSED**\n",socket->src.addr, socket->src.port);
+                dbg(TRANSPORT_CHANNEL, "\nLink: [%hhu][%hhu]<----->[%hhu][%hhu] Terminated...\n",
+                socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
+                call usedSockets.remove(socket->fd);
+                removeSocketFromList(socket->fd);
+                dbg(TRANSPORT_CHANNEL, "Mote(%hhu): Socket is removed from socketList and usedSockets...\n", TOS_NODE_ID);
+                dbg(TRANSPORT_CHANNEL, "\n\nDone Cleaning up Link...\n\n");
             }
         }
         //CLOSED
@@ -662,5 +760,29 @@ implementation{
                 return socket;
             }
         }
+    }
+
+    void removeSocketFromList(socket_t fd){
+        bool found = FALSE;
+        uint8_t count = 0;
+        socket_store_t socket;
+        dbg(TRANSPORT_CHANNEL,"Looking for Socket() to Remove from SocketList!\n", fd);
+        if(fd != NULL_SOCKET){
+            while(!found && count < MAX_NUM_OF_SOCKETS){
+                socket = call socketList.popfront();
+                if(socket.fd == fd){
+                    //matches
+                    found = TRUE;
+                    dbg(TRANSPORT_CHANNEL,"Socket(%hhu) removed!\n", socket.fd);
+                }
+                //push back data
+                call socketList.pushback(socket);
+                count++;
+            }
+            if(!found){
+                dbg(TRANSPORT_CHANNEL,"SOCKET NOT FOUND: No Sockets removed!\n");
+            }
+        }
+        //if found, socket is removed
     }
 }
