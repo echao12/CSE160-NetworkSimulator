@@ -22,6 +22,7 @@ implementation{
    pack sendPackage;
    tcp_pack TCPPackage;
    socket_t curSocketNumber;
+   uint8_t portNum = 1;
 
    void makeOutstanding(pack Package, uint16_t timeoutValue);
    void acknowledgePacket(pack *Package);
@@ -227,7 +228,8 @@ implementation{
                 socket = getSocketPtr(socketFD);
 
                 // Not sure about this one, but the new socket shouldn't have the same port as the old one
-                socket->src.port += 1;
+                socket->src.port += portNum;
+                portNum++;
 
                 //record packet source as this port's destination
                 socket->dest.addr = package->src;
@@ -394,7 +396,7 @@ implementation{
                 dbg(TRANSPORT_CHANNEL,"RECIEVED FIN!\n");
                 acknowledgePacket(package);
                 //send ACK back
-                makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, socket->lastSent+1, socket->nextExpected, 0, 0, "FIN_REPLY_LAST_ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, socket->lastSent+1, socket->nextExpected, 0, 0, "FIN_RP_L_ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
                 TCPPackage.flags = 0;//reset flags
                 setFlagBit(&TCPPackage, ACK_FLAG_BIT);
                 makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
@@ -766,7 +768,7 @@ implementation{
         bool found = FALSE;
         uint8_t count = 0;
         socket_store_t socket;
-        dbg(TRANSPORT_CHANNEL,"Looking for Socket() to Remove from SocketList!\n", fd);
+        dbg(TRANSPORT_CHANNEL,"Looking for Socket(%hhu) to Remove from SocketList!\n", fd);
         if(fd != NULL_SOCKET){
             while(!found && count < MAX_NUM_OF_SOCKETS){
                 socket = call socketList.popfront();
