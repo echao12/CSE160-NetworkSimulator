@@ -7,7 +7,7 @@ enum{
     ROOT_SOCKET_PORT = 255,
     SOCKET_BUFFER_SIZE = 128,
     NULL_SOCKET = 0, // Socket number 0 is designated as NULL, it should never be used
-    RTT_ESTIMATE = 30000,  // Conservative RTT estimate
+    RTT_ESTIMATE = 50000,  // Conservative RTT estimate
     MAX_OUTSTANDING = 200,  // Maximum number of outstanding packets
     MAX_RESEND_ATTEMPTS = 5,  // How many times to resend a packet before dropping it
     TCP_WRITE_TIMER = 500,  // Controls how frequently the application (Node) will write to the socket's send buffer
@@ -27,6 +27,11 @@ enum socket_state{
     TIME_WAIT,
 };
 
+enum buffer_state {
+    TYPICAL,
+    WRAP,
+    FULL,
+};
 
 typedef nx_uint8_t nx_socket_port_t;
 typedef uint8_t socket_port_t;
@@ -45,6 +50,7 @@ typedef uint8_t socket_t;
 typedef struct socket_store_t{
     uint8_t flag;
     enum socket_state state;
+    enum buffer_state bufferState;
     
     //socket_port_t src;
     socket_t fd;//socket#

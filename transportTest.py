@@ -19,7 +19,7 @@ def main():
     # Add the main channels. These channels are declared in includes/channels.h
     s.addChannel(s.COMMAND_CHANNEL);
     s.addChannel(s.GENERAL_CHANNEL);
-    s.addChannel(s.TRANSPORT_CHANNEL);
+#    s.addChannel(s.TRANSPORT_CHANNEL);
 
     # Give some time for the nodes to find neighbors and build routing tables
     s.runTime(1000)
@@ -33,7 +33,7 @@ def main():
     # Designate a node as the client and begin transmission
     #srcMote,srcPort,destMote,destPort,transfer
     #note: client send val 0->transfer to server
-    s.testClient(4, 200, 1, 100, 10);
+    s.testClient(4, 200, 1, 100, 100);
     s.runTime(1);
     #s.testClient(5, 100, 1, 200, 10);
     #s.runTime(1);

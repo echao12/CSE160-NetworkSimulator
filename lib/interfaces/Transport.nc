@@ -55,6 +55,8 @@ interface Transport{
     */
    command socket_t accept(socket_t fd);
 
+   event void addSocket(socket_t fd);
+
    /**
     * Write to the socket from a buffer. This data will eventually be
     * transmitted through your TCP implimentation.

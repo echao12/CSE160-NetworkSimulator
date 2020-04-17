@@ -44,6 +44,7 @@ module Node{
    uses interface Transport as Transport; // handles sockets
    uses interface Timer<TMilli> as TCPWriteTimer;
    uses interface Timer<TMilli> as TCPReadTimer;
+   uses interface List<socket_t> as socketList;
 }
 
 implementation{
@@ -471,18 +472,22 @@ implementation{
    }
 
    event void TCPReadTimer.fired() {
-      // TODO: Figure out what to do in case there are multiple receiver sockets
-
       uint8_t buff[SOCKET_BUFFER_SIZE];
-      uint16_t i, num, numbersRead;
+      uint16_t i, j, num, numbersRead, numSockets;
+      socket_t fd;
 
-      // Read the socket's buffer
-      numbersRead = call Transport.read(default_socket, buff, SOCKET_BUFFER_SIZE) / 2;
+      numSockets = call socketList.size();
+      for (i = 0; i < numSockets; i++) {
+         fd = call socketList.get(i);
 
-      // Print out the numbers
-      for (i = 0; i < numbersRead; i++) {
-         memcpy(&buff[i*2], &num, 2);
-         dbg(TRANSPORT_CHANNEL, "Received number: %hhu\n", num);
+         // Read the socket's buffer
+         numbersRead = call Transport.read(fd, buff, SOCKET_BUFFER_SIZE) / 2;
+
+         // Print out the numbers
+         for (j = 0; j < numbersRead; j++) {
+            memcpy(&num, &buff[j*2], 2);
+            dbg(GENERAL_CHANNEL, "Received number: %hhu\n", num);
+         }  
       }
    }
 
@@ -497,6 +502,10 @@ implementation{
       call packetsQueue.pushback(*package);
       incrementSequence();
       return SUCCESS;
+   }
+
+   event void Transport.addSocket(socket_t fd) {
+      call socketList.pushback(fd);
    }
 
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t protocol, uint16_t seq, uint8_t* payload, uint8_t length){

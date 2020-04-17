@@ -24,15 +24,22 @@ implementation{
    socket_t curSocketNumber;
    uint8_t portNum = 1;
 
+   void processPacket(socket_store_t* socket, tcp_pack* packet);
+   uint16_t sendFromBuffer(socket_store_t* socket, uint8_t advertisedWindow);
+
    void makeOutstanding(pack Package, uint16_t timeoutValue);
-   void acknowledgePacket(pack *Package);
+   void acknowledgePacket(socket_store_t* socket, pack *Package);
 
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
-   void makeTCPPack(tcp_pack *Package, uint8_t srcPort, uint8_t destPort, uint16_t byteSeq, uint16_t acknowledgement, uint8_t flags, uint8_t advertisedWindow, uint8_t *payload, uint8_t length);
+   void makeTCPPack(tcp_pack *Package, uint8_t srcPort, uint8_t destPort, uint8_t byteSeq, uint16_t acknowledgement, uint8_t flags, uint8_t advertisedWindow, uint8_t *payload, uint8_t length);
    void extractTCPPack(pack *Package, tcp_pack* TCPPack);
    void removeSocketFromList(socket_t fd);
 
    socket_store_t* getSocketPtr(socket_t fd);
+   uint8_t increaseByteSeq(uint8_t byteSeq, uint8_t x);
+   uint8_t decreaseByteSeq(uint8_t byteSeq, uint8_t x);
+   void resetBuffer(uint8_t* buff, uint16_t bufflen);
+   uint16_t getPayloadLength(uint8_t* buff);
 
    /**
     * Get a socket if there is one available.
@@ -75,26 +82,39 @@ implementation{
     * @return error_t - SUCCESS if you were able to bind this socket, FAIL
     *       if you were unable to bind.
     */
-   command error_t Transport.bind(socket_t fd, socket_addr_t *addr){
+    command error_t Transport.bind(socket_t fd, socket_addr_t *addr){
         //generate a new socket_store_t
         socket_store_t socketConfig;
         error_t error;
         dbg(TRANSPORT_CHANNEL, "Binding: fd(%hhu) to src_addr(P:%hhu / ID:%hhu)\n", fd, addr->port, addr->addr);
-        if(fd != NULL_SOCKET && addr != NULL){
-            socketConfig.src.port = addr->port;//i guess TOS_NODE_ID is address and already a given?
-            socketConfig.src.addr = addr->addr;
+        if (fd != NULL_SOCKET && addr != NULL) {
+            // Initialize socket
             socketConfig.fd = fd;
+            socketConfig.src.addr = addr->addr;
+            socketConfig.src.port = addr->port;
+            socketConfig.dest.addr = 0;
+            socketConfig.dest.port = 0;
             socketConfig.state = CLOSED;
+            socketConfig.bufferState = TYPICAL;
+            resetBuffer(socketConfig.sendBuff, SOCKET_BUFFER_SIZE);
+            resetBuffer(socketConfig.rcvdBuff, SOCKET_BUFFER_SIZE);
+            socketConfig.lastWritten = socketConfig.lastAck = socketConfig.lastSent = 0;
+            socketConfig.lastRead = socketConfig.lastRcvd = socketConfig.nextExpected = 0;
+            socketConfig.RTT = RTT_ESTIMATE;
+
             call socketList.pushback(socketConfig);//adding it to this node's socketlist
             dbg(TRANSPORT_CHANNEL, "SUCESSFULLY BOUNDED!\n");
             error = SUCCESS;
             call resendTimer.startOneShotAt(call resendTimer.getNow(), RTT_ESTIMATE);
-       }else{
+
+            signal Transport.addSocket(fd);
+        }
+        else {
             dbg(TRANSPORT_CHANNEL, "FAILED TO BIND!\n");
             error = FAIL;
-       }
-       return error;
-   }
+        }
+        return error;
+    }
 
    /**
     * Checks to see if there are socket connections to connect to and
@@ -140,9 +160,9 @@ implementation{
     * @return uint16_t - return the amount of data you are able to write
     *    from the pass buffer. This may be shorter then bufflen
     */
-   command uint16_t Transport.write(socket_t fd, uint8_t *buff, uint16_t bufflen){
+    command uint16_t Transport.write(socket_t fd, uint8_t *buff, uint16_t bufflen){
         socket_store_t* socket;
-        uint16_t i, num;
+        uint16_t i, bytePos, bytesWritten;
         
         // Get the specified socket
         socket = getSocketPtr(fd);
@@ -158,17 +178,35 @@ implementation{
             return 0;
         }
 
-        // Use lastAck/lastWritten to calculate how much data to write to the buffer
-        // For now, just make sure all the numbers can get here correctly
-        dbg(TRANSPORT_CHANNEL, "Writing to sendBuff:\n");
-        for (i = 0; i < bufflen; i += 2) {
-            memcpy(&num, &buff[i], 2);
-            dbg(TRANSPORT_CHANNEL, "%hhu\n", num);
+        // Write buffer byte by byte
+        bytesWritten = 0;
+        bytePos = socket->lastWritten;
+        for (i = 0; i < bufflen; i++) {
+            bytePos = increaseByteSeq(bytePos, 1);
+            if (socket->sendBuff[bytePos] == 0) {
+                // This position of the send buffer is empty, fill it
+                socket->sendBuff[bytePos] = buff[i];
+                bytesWritten++;
+                socket->lastWritten = bytePos;
+                if (socket->lastAck < socket->lastWritten) {
+                    socket->bufferState = TYPICAL;
+                }
+                else if (socket->lastWritten < socket->lastAck) {
+                    socket->bufferState = WRAP;
+                }
+                else {
+                    socket->bufferState = FULL;
+                    break;
+                }
+            }
+            else {
+                // Send buffer is already full
+                break;
+            }
         }
-        dbg(TRANSPORT_CHANNEL, "Finished writing\n");
 
-        return bufflen;
-   }
+        return bytesWritten;
+    }
 
    /**
     * This will pass the packet so you can handle it internally. 
@@ -181,9 +219,9 @@ implementation{
     command error_t Transport.receive(pack* package){
         socket_store_t* socket = NULL;
         socket_t socketFD;
-        uint16_t i, numSockets;
+        uint16_t i, numSockets, numPacketsSent;
         error_t error;
-        uint8_t windowSize = 1;
+        uint8_t advertisedWindow, nextByteSeq;
 
         dbg(TRANSPORT_CHANNEL, "Transport Module: \nNODE(%hhu) RECIEVED TCP Packet seq#(%hhu)\n", TOS_NODE_ID, package->seq);
         extractTCPPack(package, &TCPPackage);
@@ -208,12 +246,12 @@ implementation{
             return FAIL;
         }
 
-        dbg(TRANSPORT_CHANNEL, "Checking socket state...(STATE:%hhu)\n", socket->state);
+        // dbg(TRANSPORT_CHANNEL, "Checking socket state...(STATE:%hhu)\n", socket->state);
         //LISTEN
-        if(socket->state == LISTEN){
+        if (socket->state == LISTEN) {
             dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: LISTENING...\n");
             //check for a SYN msg
-            if(checkFlagBit(&TCPPackage, SYN_FLAG_BIT)){
+            if (checkFlagBit(&TCPPackage, SYN_FLAG_BIT)) {
                 dbg(TRANSPORT_CHANNEL, "RECEIVED SYN PACKET(sender seq#: %hhu)\nREPLYING with SYN/ACK TCP Packet\n", package->seq);
                 
                 // Try to create a new socket for the connection
@@ -231,16 +269,21 @@ implementation{
                 socket->src.port += portNum;
                 portNum++;
 
-                //record packet source as this port's destination
+                // Record packet source as this port's destination
                 socket->dest.addr = package->src;
                 socket->dest.port = TCPPackage.srcPort;
 
-                //record sequence#
+                // Initialize sliding window parameters
+                // Note: There's no need to initialize byteSeq for the server (unlike the example given in the book) because
+                // the server isn't going to send any data to the client in this project.
+                socket->bufferState = TYPICAL;
+                socket->lastRead = TCPPackage.byteSeq;
+                socket->nextExpected = increaseByteSeq(TCPPackage.byteSeq, 1);
                 socket->lastRcvd = TCPPackage.byteSeq;
-                socket->nextExpected = TCPPackage.byteSeq + 1;
+                advertisedWindow = SOCKET_BUFFER_SIZE;  // Buffer is empty, so advertise max window size
 
-                //generate SYN packet with ack, recall 4th argument is byteSeq;
-                makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, 0, socket->nextExpected, 0, 0, "SYN_REPLY", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                // Reply with a SYN+ACK packet
+                makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, 0, socket->nextExpected, 0, advertisedWindow, "SYN_REPLY", TCP_PACKET_MAX_PAYLOAD_SIZE);
                 setFlagBit(&TCPPackage, SYN_FLAG_BIT);
                 setFlagBit(&TCPPackage, ACK_FLAG_BIT);
                 makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
@@ -249,7 +292,6 @@ implementation{
                 if (signal Transport.send(&sendPackage) == SUCCESS) {
                     makeOutstanding(sendPackage, RTT_ESTIMATE);
                     socket->state = SYN_RCVD;
-                    socket->lastSent = TCPPackage.byteSeq;//not too sure yet.
                     error = SUCCESS;
                 }
             }
@@ -259,26 +301,34 @@ implementation{
             dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: SYN_SENT\n");
             // Check for SYN+ACK packet
             if (checkFlagBit(&TCPPackage, SYN_FLAG_BIT) && checkFlagBit(&TCPPackage, ACK_FLAG_BIT)) {
-                //the packet's ACK value is the expecting value
                 dbg(TRANSPORT_CHANNEL, "RECEIVED SYN+ACK PACKET\nREPLYING with ACK TCP Packet\n");
+
                 socket->dest.port = TCPPackage.srcPort;  // Change dest.port to match the receiver's new socket
-                socket->lastAck = TCPPackage.acknowledgement - 1;//(NOT SURE ABOUT THIS YET) i think it should be the packet's ack #
-                socket->nextExpected = TCPPackage.byteSeq + 1;
-                // Make ACK packet with reciever's byteSeq+1 val
-                makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, socket->lastSent+1, socket->nextExpected, 0, 0, "ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                
+                // Update sliding window parameters
+                socket->lastAck = decreaseByteSeq(TCPPackage.acknowledgement, 1);
+                nextByteSeq = increaseByteSeq(socket->lastSent, 1);
+                advertisedWindow = SOCKET_BUFFER_SIZE;
+                
+                // Reply with an ACK packet
+                makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, nextByteSeq, 1, 0, advertisedWindow, "ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
                 setFlagBit(&TCPPackage, ACK_FLAG_BIT);
                 makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
                 memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+
                 if (signal Transport.send(&sendPackage) == SUCCESS) {
-                    //update sender socket values
-                    socket->lastSent++;
-                    acknowledgePacket(package);
+                    acknowledgePacket(socket, package);
                     makeOutstanding(sendPackage, RTT_ESTIMATE);
+                    
+                    socket->lastWritten = nextByteSeq;
+                    socket->lastSent = nextByteSeq;
                     socket->state = ESTABLISHED;
-                    //adjust usedSocket value
+
+                    // Adjust usedSocket value
                     call usedSockets.set(socket->fd, 1);
-                    dbg(TRANSPORT_CHANNEL, "\n**SOCKET(%hhu) [%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED**\n",
-                        socket->fd, socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
+                    dbg(TRANSPORT_CHANNEL, "\nSOCKET[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
+                    socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
+                    
                     error = SUCCESS;
                 }
             }
@@ -289,53 +339,68 @@ implementation{
             // Check for any ACK packet with proper seq#
             if (checkFlagBit(&TCPPackage, ACK_FLAG_BIT)) {
                 dbg(TRANSPORT_CHANNEL, "RECEIVED ACK PACKET\n");
+                
+                // Update sliding window parameters
+                socket->nextExpected = increaseByteSeq(TCPPackage.byteSeq, 1);
                 socket->lastRcvd = TCPPackage.byteSeq;
-                socket->nextExpected = TCPPackage.byteSeq + 1;
+                advertisedWindow = SOCKET_BUFFER_SIZE;
+                
                 socket->state = ESTABLISHED;  // Change state to ESTABLISHED no matter what
-                //adjust usedSocket Map value
-                call usedSockets.set(socket->fd, 1);//1 is established, 0 is not
-                dbg(TRANSPORT_CHANNEL, "\n**SOCKET(%hhu) [%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED**\n",
-                    socket->fd, socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
-                acknowledgePacket(package);
-                //Send effective window
-                //Send effective window to client
-                dbg(TRANSPORT_CHANNEL, "Sending effective window size (%hhu)\n", windowSize);
-                makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, socket->lastSent+1, socket->nextExpected, 0, windowSize, "Windowing...", TCP_PACKET_MAX_PAYLOAD_SIZE);
-                TCPPackage.flags = 0;//reset flags
+                acknowledgePacket(socket, package);
+                
+                // Adjust usedSocket Map value
+                call usedSockets.set(socket->fd, 1); //1 is established, 0 is not
+                dbg(TRANSPORT_CHANNEL, "\nSOCKET[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
+                    socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
+                
+                // Send an ACK packet to the client, it doesn't matter if this ACK packet reaches the client or not
+                makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, 1, socket->nextExpected, 0, advertisedWindow, "ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
                 setFlagBit(&TCPPackage, ACK_FLAG_BIT);
+                resetBuffer(TCPPackage.payload, TCP_PACKET_MAX_PAYLOAD_SIZE);
                 makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
                 memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
-                if(signal Transport.send(&sendPackage) == SUCCESS){
-                    makeOutstanding(sendPackage, RTT_ESTIMATE);
-                    socket->lastSent++;
+
+                if (signal Transport.send(&sendPackage) == SUCCESS) {
+                    socket->lastRead = TCPPackage.byteSeq;
+                    error = SUCCESS;
                 }
             }
         }
         //ESTABLISHED
         else if (socket->state == ESTABLISHED) {
-            //received a packet, update info
-            socket->lastRcvd = TCPPackage.byteSeq;
-            socket->nextExpected = TCPPackage.byteSeq + 1;
-            
             dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: ESTABLISHED\n");
-            // Drop any SYN packet
             if (checkFlagBit(&TCPPackage, SYN_FLAG_BIT)) {
-                // Do nothing
+                // Ignore any SYN packet
             }
             else if (checkFlagBit(&TCPPackage, ACK_FLAG_BIT)) {
-                dbg(TRANSPORT_CHANNEL, "Recieved ACK Packet.\t");
-                dbg(TRANSPORT_CHANNEL, "AdvertiseWindow size(%hhu)\n", TCPPackage.advertisedWindow);
-                if(TCPPackage.advertisedWindow != socket->effectiveWindow){
-                    acknowledgePacket(package);//packet received
-                    dbg(TRANSPORT_CHANNEL,"Adjusted effectiveWindow(%hhu) to match advertisedWindow(%hhu)...\n", socket->effectiveWindow, TCPPackage.advertisedWindow);
-                    socket->effectiveWindow = TCPPackage.advertisedWindow;
+                dbg(TRANSPORT_CHANNEL, "Received ACK packet, advertisedWindow = %hhu\n", TCPPackage.advertisedWindow);
+                acknowledgePacket(socket, package);
+                i = getPayloadLength(TCPPackage.payload);
+                
+                // Process the packet first (mostly used by the receiver side)
+                processPacket(socket, &TCPPackage);
+
+                // Send some amount of packets depending on how much data is in the send buffer and also the advertisedWindow
+                numPacketsSent = sendFromBuffer(socket, TCPPackage.advertisedWindow);
+
+                if (numPacketsSent == 0 && i > 0) {
+                    // Send at least an ACK packet
+                    advertisedWindow = SOCKET_BUFFER_SIZE - (socket->nextExpected - 1 - socket->lastRead);
+                    makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, 0, socket->nextExpected, 0, advertisedWindow, "null", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                    setFlagBit(&TCPPackage, ACK_FLAG_BIT);
+                    resetBuffer(TCPPackage.payload, TCP_PACKET_MAX_PAYLOAD_SIZE);
+                    makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+                    memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+
+                    signal Transport.send(&sendPackage);
                 }
+                error = SUCCESS;
 
             }else if(checkFlagBit(&TCPPackage, FIN_FLAG_BIT)){
                 //signal server that client wants to close connection
                 dbg(TRANSPORT_CHANNEL, "Recieved FIN Packet.\nLink: [%hhu][%hhu]<----->[%hhu][%hhu]\nSTARTING DISCONNECTION...\n",
                 socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
-                acknowledgePacket(package);//packet received
+                acknowledgePacket(socket, package);//packet received
 
                 //send CLOSE_WAIT packet to ack the FIN
                 makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, socket->lastSent+1, socket->nextExpected, 0, 0, "FIN ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
@@ -394,7 +459,7 @@ implementation{
             socket->nextExpected = TCPPackage.byteSeq + 1;
             if(checkFlagBit(&TCPPackage, FIN_FLAG_BIT)){
                 dbg(TRANSPORT_CHANNEL,"RECIEVED FIN!\n");
-                acknowledgePacket(package);
+                acknowledgePacket(socket, package);
                 //send ACK back
                 makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, socket->lastSent+1, socket->nextExpected, 0, 0, "FIN_RP_L_ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
                 TCPPackage.flags = 0;//reset flags
@@ -424,7 +489,7 @@ implementation{
             socket->nextExpected = TCPPackage.byteSeq + 1;
             if(checkFlagBit(&TCPPackage, ACK_FLAG_BIT)){
                 dbg(TRANSPORT_CHANNEL, "RECIEVED AN ACK!\nClosing the connection...");
-                acknowledgePacket(package);
+                acknowledgePacket(socket, package);
                 //close the connection
                 socket->state = CLOSED;
                 dbg(TRANSPORT_CHANNEL,"\n**SOCKET[%hhu][%hhu] IS CLOSED**\n",socket->src.addr, socket->src.port);
@@ -440,9 +505,135 @@ implementation{
         else if (socket->state == CLOSED) {
             // This socket is not open to communication, so do nothing
             dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: CLOSED\n");
+            error = FAIL;
         }
 
         return error;
+    }
+
+    void processPacket(socket_store_t* socket, tcp_pack* packet) {
+        // Process a TCP packet
+        uint16_t i, num, bytePos;
+
+        // Process the payload byte by byte
+        for (i = 0; i < TCP_PACKET_MAX_PAYLOAD_SIZE; i+=2) {
+            memcpy(&num, &packet->payload[i], 2);
+            if (num == 0) {
+                // End of payload
+                break;
+            }
+
+            // Determine the position of this byte in the receive buffer
+            bytePos = increaseByteSeq(packet->byteSeq, i);
+
+            if (socket->rcvdBuff[bytePos] == 0) {
+                // Only fill this part of the buffer if it is empty
+                memcpy(&socket->rcvdBuff[bytePos], &num, 2);
+                dbg(TRANSPORT_CHANNEL, "rcvdBuff[%hhu] = %hhu\n", bytePos, socket->rcvdBuff[bytePos]);
+
+                // Update sliding window parameters (receiver side)
+                if (socket->bufferState == TYPICAL) {
+                    if (bytePos > socket->lastRcvd || bytePos < socket->lastRead) {
+                        socket->lastRcvd = bytePos;
+                        if (socket->lastRcvd < socket->lastRead) {
+                            socket->bufferState = WRAP;
+                        }
+                    }
+                }
+                else {
+                    if (socket->lastRcvd < bytePos && bytePos <= socket->lastRead) {
+                        socket->lastRcvd = bytePos;
+                        if (socket->lastRcvd == socket->lastRead) {
+                            socket->bufferState = FULL;
+                        }
+                    }
+                }
+
+                if (socket->bufferState != FULL) {
+                    memcpy(&num, &socket->rcvdBuff[socket->nextExpected], 2);
+                    while (num != 0) {
+                        socket->nextExpected = increaseByteSeq(socket->nextExpected, 2);
+                        memcpy(&num, &socket->rcvdBuff[socket->nextExpected], 2);
+                    }
+                }
+            }
+        }
+    }
+
+    uint16_t sendFromBuffer(socket_store_t* socket, uint8_t advertisedWindow) {
+        // Empty send buffer by sending as many packets as possible (keep in mind the advertisedWindow size)
+        uint16_t i, j, num, bytePos, packetsSent = 0;
+        bool isEmpty;
+
+        // Calculate effective window size
+        if (socket->lastSent >= socket->lastAck) {
+            if (advertisedWindow > socket->lastSent - socket->lastAck) {
+                socket->effectiveWindow = advertisedWindow - (socket->lastSent - socket->lastAck);
+            }
+            else {
+                socket->effectiveWindow = 0;
+            }
+        }
+        else {
+            if (advertisedWindow > SOCKET_BUFFER_SIZE + socket->lastSent - socket->lastAck) {
+                socket->effectiveWindow = advertisedWindow - (SOCKET_BUFFER_SIZE + socket->lastSent - socket->lastAck);
+            }
+            else {
+                socket->effectiveWindow = 0;
+            }
+        }
+        dbg(TRANSPORT_CHANNEL, "AdvertisedWindow %hhu  Effective Window %hhu\n", advertisedWindow, socket->effectiveWindow);
+
+        // Calculate this socket's advertisedWindow
+        advertisedWindow = SOCKET_BUFFER_SIZE - (socket->nextExpected - 1 - socket->lastRead);
+
+        bytePos = increaseByteSeq(socket->lastSent, 1);
+        for (i = 0; i < socket->effectiveWindow; i += TCP_PACKET_MAX_PAYLOAD_SIZE) {
+            // Create a packet
+            makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, bytePos, socket->nextExpected, 0, advertisedWindow, "TBD", TCP_PACKET_MAX_PAYLOAD_SIZE);
+            setFlagBit(&TCPPackage, ACK_FLAG_BIT);
+
+            // Fill the payload with data from send buffer
+            isEmpty = TRUE;
+            for (j = 0; j < TCP_PACKET_MAX_PAYLOAD_SIZE; j += 2) {
+                memcpy(&num, &socket->sendBuff[bytePos], 2);
+                bytePos = increaseByteSeq(bytePos, 2);
+                if (i + j + 2 > socket->effectiveWindow) {
+                    break;
+                }
+                else if (num == 0) {
+                    break;
+                }
+                else if (socket->bufferState == FULL && bytePos == increaseByteSeq(socket->lastAck, 1)) {
+                    break;
+                }
+                else {
+                    dbg(TRANSPORT_CHANNEL, "sendBuff[%hhu] = %hhu\n", decreaseByteSeq(bytePos, 2), num);
+                    memcpy(&TCPPackage.payload[j], &num, 2);
+                    socket->lastSent = decreaseByteSeq(bytePos, 1);
+                    isEmpty = FALSE;
+                }
+            }
+            for (; j < TCP_PACKET_MAX_PAYLOAD_SIZE; j++) {
+                TCPPackage.payload[j] = 0;
+            }
+
+            if (isEmpty) {
+                break;
+            }
+            else {
+                dbg(TRANSPORT_CHANNEL, "Sending packet\n");
+            }
+
+            makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+            memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+
+            signal Transport.send(&sendPackage);
+            makeOutstanding(sendPackage, RTT_ESTIMATE);
+            packetsSent++;
+        }
+
+        return packetsSent;
     }
 
    /**
@@ -462,7 +653,7 @@ implementation{
     */
     command uint16_t Transport.read(socket_t fd, uint8_t *buff, uint16_t bufflen){
         socket_store_t* socket;
-        uint16_t i, num;
+        uint16_t i, num, bytePos, bytesRead;
         
         // Get the specified socket
         socket = getSocketPtr(fd);
@@ -478,9 +669,34 @@ implementation{
             return 0;
         }
 
-        // Use lastRead/lastRcvd to calculate how much data to write to the buffer
+        // Read buffer byte by byte
+        bytesRead = 0;
+        bytePos = increaseByteSeq(socket->lastRead, 1);
+        for (i = 0; i < bufflen; i+=2) {
+            memcpy(&num, &socket->rcvdBuff[bytePos], 2);
+            if (num != 0) {
+                // There is something to read
+                memcpy(&buff[i], &num, 2);  // copy the data
+                socket->rcvdBuff[bytePos] = 0;
+                socket->rcvdBuff[bytePos+1] = 0;    
+                socket->lastRead = bytePos+1;
+                if (socket->lastRead < socket->lastRcvd) {
+                    socket->bufferState = TYPICAL;
+                }
+                else {
+                    socket->bufferState = WRAP;
+                }
+                bytesRead += 2;
+            }
+            else {
+                // No more data to read
+                socket->nextExpected = bytePos;
+                break;
+            }
+            bytePos = increaseByteSeq(bytePos, 2);
+        }
 
-        return 0;
+        return bytesRead;
     }
 
    /**
@@ -497,6 +713,7 @@ implementation{
     */
     command error_t Transport.connect(socket_t fd, socket_addr_t * addr){
         socket_store_t* socket;
+        uint8_t initialByteSeq;
 
         // Get the specified socket
         socket = getSocketPtr(fd);
@@ -510,10 +727,18 @@ implementation{
             return FAIL;
         }
 
+        // Set destination address (this can still change during the three-way handshake)
         socket->dest = *addr;
 
+        // Initialize sliding window parameters
+        socket->bufferState = TYPICAL;
+        initialByteSeq = 0;  // Set as 0 for now, but randomize it later after everything's working (note: always pick an even number)
+        socket->lastAck = initialByteSeq;
+        socket->lastSent = initialByteSeq;
+        socket->lastWritten = initialByteSeq;
+
         // Send a SYN packet
-        makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, 0, 0, 0, 0, "SYN", TCP_PACKET_MAX_PAYLOAD_SIZE);
+        makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, initialByteSeq, 0, 0, 0, "SYN", TCP_PACKET_MAX_PAYLOAD_SIZE);
         setFlagBit(&TCPPackage, SYN_FLAG_BIT);
         makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
         memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
@@ -529,6 +754,7 @@ implementation{
         }
         else {
             // Failed to send a SYN package
+            dbg(TRANSPORT_CHANNEL, "ERROR: Failed to send SYN packet\n");
             return FAIL;
         }
     }
@@ -698,27 +924,44 @@ implementation{
         call resendAttempts.pushback(0);
     }
 
-    void acknowledgePacket(pack* ackPack) {
+    void acknowledgePacket(socket_store_t* socket, pack* ackPack) {
         // Try to match the ACK packet with an outstanding packet and remove that outstanding packet from the list
         pack sentPack;
         tcp_pack sentTCP, ackTCP;
         uint32_t t;
-        uint16_t i, attempt, numOutstanding = call outstandingPackets.size();
+        uint16_t i, attempt, bytePos, numOutstanding = call outstandingPackets.size();
         extractTCPPack(ackPack, &ackTCP);
         if (checkFlagBit(&ackTCP, ACK_FLAG_BIT)) {
             for (i = 0; i < numOutstanding; i++) {
                 sentPack = call outstandingPackets.popfront();
                 t = call timeToResend.popfront();
                 attempt = call resendAttempts.popfront();
+
                 if (sentPack.src == ackPack->dest && sentPack.dest == ackPack->src) {
                     extractTCPPack(&sentPack, &sentTCP);
                     if (sentTCP.srcPort == ackTCP.destPort && sentTCP.destPort && ackTCP.srcPort) {
-                        if (sentTCP.byteSeq < ackTCP.acknowledgement && sentTCP.byteSeq + TCP_PACKET_MAX_PAYLOAD_SIZE + 1 >= ackTCP.acknowledgement) {
-                            // dbg(TRANSPORT_CHANNEL, "Outstanding packet removed\n");
+                        bytePos = increaseByteSeq(socket->lastAck, 1);
+                        if (socket->sendBuff[bytePos] == 0) {
+                            // This position of the buffer is already freed.
+                            // This might happen if the ACK packet arrives too late.
                             continue;
                         }
+                        while (bytePos != ackTCP.acknowledgement) {
+                            // Free the buffer at this position
+                            socket->sendBuff[bytePos] = 0;
+                            socket->lastAck = bytePos;
+                            if (socket->lastAck < socket->lastWritten) {
+                                socket->bufferState = TYPICAL;
+                            }
+                            else if (socket->lastWritten < socket->lastAck) {
+                                socket->bufferState = WRAP;
+                            }
+                            bytePos = increaseByteSeq(bytePos, 1);
+                        }
+                        break;
                     }
                 }
+
                 // The packet doesn't match, return it to the list
                 call outstandingPackets.pushback(sentPack);
                 call timeToResend.pushback(t);
@@ -736,7 +979,7 @@ implementation{
       memcpy(Package->payload, payload, length);
    }
 
-   void makeTCPPack(tcp_pack *Package, uint8_t srcPort, uint8_t destPort, uint16_t byteSeq, uint16_t acknowledgement, uint8_t flags, uint8_t advertisedWindow, uint8_t *payload, uint8_t length) {
+   void makeTCPPack(tcp_pack *Package, uint8_t srcPort, uint8_t destPort, uint8_t byteSeq, uint16_t acknowledgement, uint8_t flags, uint8_t advertisedWindow, uint8_t *payload, uint8_t length) {
       Package->srcPort = srcPort;
       Package->destPort = destPort;
       Package->byteSeq = byteSeq;
@@ -786,5 +1029,42 @@ implementation{
             }
         }
         //if found, socket is removed
+    }
+
+    uint8_t increaseByteSeq(uint8_t byteSeq, uint8_t x) {
+        // Increase byteSeq by x, wrap around if necessary
+        return (byteSeq + x) % SOCKET_BUFFER_SIZE;
+    }
+
+    uint8_t decreaseByteSeq(uint8_t byteSeq, uint8_t x) {
+        // Decrease byteSeq by x, wrap around if necessary
+        if (byteSeq < x) {
+            return (byteSeq + SOCKET_BUFFER_SIZE - x) % SOCKET_BUFFER_SIZE;
+        }
+        else {
+            return byteSeq - x;
+        }
+    }
+
+    void resetBuffer(uint8_t* buff, uint16_t bufflen) {
+        // Reset bufflen amount of bytes from the start of the buffer
+        uint16_t i;
+        for (i = 0; i < bufflen; i++) {
+            buff[i] = 0;
+        }
+    }
+
+    uint16_t getPayloadLength(uint8_t* buff) {
+        uint16_t i, num, len = 0;
+        for (i = 0; i < TCP_PACKET_MAX_PAYLOAD_SIZE; i += 2) {
+            memcpy(&num, &buff[i], 2);
+            if (num != 0) {
+                len++;
+            }
+            else {
+                break;
+            }
+        }
+        return len;
     }
 }

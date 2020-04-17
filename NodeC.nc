@@ -65,4 +65,7 @@ implementation {
 
     components new TimerMilliC() as TCPReadTimerC;
     Node.TCPReadTimer -> TCPReadTimerC;
+
+    components new ListC(socket_t, MAX_NUM_OF_SOCKETS) as socketListC;
+    Node.socketList -> socketListC;
 }
