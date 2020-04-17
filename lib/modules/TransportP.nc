@@ -331,6 +331,7 @@ implementation{
             }else if(checkFlagBit(&TCPPackage, FIN_FLAG_BIT)){
                 dbg(TRANSPORT_CHANNEL, "Recieved FIN Packet.\nLink: [%hhu][%hhu]<----->[%hhu][%hhu]\nSTARTING DISCONNECTION...\n",
                 socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
+                acknowledgePacket(package);//packet received
             }else if(TCPPackage.flags == 0){
 
             }
