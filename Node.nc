@@ -363,10 +363,8 @@ implementation{
 
    event void CommandHandler.printDistanceVector(){}
 
-   //sets up the server for this node
+   // Designate this node as a server
    event void CommandHandler.setTestServer(uint16_t port){
-      //prepare the socket.
-      //might switch to a hashmap and map fd to addr...
       socket_t fd;// socket #. note: socket is an entry into a file descriptor table
       socket_addr_t addr; // holds socket port and addr
 
@@ -378,26 +376,28 @@ implementation{
       addr.port = port;
 
       //bind the socket# to socket structure
-      if(call Transport.bind(fd, &addr) == SUCCESS){
+      if (call Transport.bind(fd, &addr) == SUCCESS) {
          dbg(TRANSPORT_CHANNEL,"Server: SUCCESSFULLY bounded address (%hhu) to socket (%hhu)\n", TOS_NODE_ID, fd);
-      }else{
+      }
+      else {
          //probably fd is a NULL Socket, thus no available sockets to bind
          //thus we must remove a connection
          dbg(TRANSPORT_CHANNEL,"Server: FAILED to bind address (%hhu) to socket (%hhu)\n", TOS_NODE_ID, fd);
       }
-      //listen for connections from the socket
-      //will foce close any current connections in this socketsocket
-      //listen will set a timer to fire Transport.accept() periodically to check for incoming connections
-      if(call Transport.listen(fd) == SUCCESS){
+
+      // ask the socket to start listening for incoming TCP packets
+      if (call Transport.listen(fd) == SUCCESS) {
          //modified socket state to listen
          dbg(TRANSPORT_CHANNEL, "Server: Listening at socket (%hhu)...\n", fd);
          default_socket = fd;
          call TCPReadTimer.startPeriodic(TCP_READ_TIMER);
-      }else{
+      }
+      else {
          dbg(TRANSPORT_CHANNEL, "Server: FAILED to switch socket(%hhu)'s state to LISTEN...\n", fd);
       }
    }
 
+   // Desginate this node as a client
    event void CommandHandler.setTestClient(uint16_t destination, uint16_t sourcePort, uint16_t destinationPort, uint16_t transfer){
       socket_t socket;
       socket_addr_t sourceAddress, destinationAddress;

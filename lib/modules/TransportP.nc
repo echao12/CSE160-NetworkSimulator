@@ -6,7 +6,6 @@ module TransportP{
     // to see what funcitons we need to implement.
    provides interface Transport;
    uses interface List<socket_store_t> as socketList;
-   uses interface Timer<TMilli> as listenTimer;
    uses interface Random;
    //track available sockets. value(0):open socket, value(1) established connection
    uses interface Hashmap<socket_t> as usedSockets;
@@ -19,7 +18,6 @@ module TransportP{
 
 
 implementation{
-   socket_t listenFd = NULL_SOCKET;
    pack sendPackage;
    tcp_pack TCPPackage;
    socket_t curSocketNumber;
@@ -361,73 +359,43 @@ implementation{
     * @return socket_t - returns SUCCESS if you are able to attempt
     *    a connection with the fd passed, else return FAIL.
     */
-   command error_t Transport.connect(socket_t fd, socket_addr_t * addr){
-       bool found = FALSE;
-       socket_store_t socket;
-       pack packet;
-       error_t error;
+    command error_t Transport.connect(socket_t fd, socket_addr_t * addr){
+        socket_store_t* socket;
 
-       if (call usedSockets.contains(fd)) {
-           // If socket fd exists, extract it from the list
-           while (!found) {
-               socket = call socketList.popfront();
-               if (socket.fd == fd) {
-                   break;
-               }
-               else {
-                   call socketList.pushback(socket);
-               }
-           }
+        // Get the specified socket
+        socket = getSocketPtr(fd);
 
-           if (socket.state == CLOSED) {
-               // This socket is currently idle
-               // Set the destination address
-               socket.dest = *addr;
+        if (socket == NULL) {
+            // The specified socket does not exist
+            return FAIL;
+        }
+        else if (socket->state != CLOSED) {
+            // The specified socket is not currently idle
+            return FAIL;
+        }
 
-               // Send a SYN packet
-               makeTCPPack(&TCPPackage, socket.src.port, socket.dest.port, 0, 0, 0, 0, "SYN", TCP_PACKET_MAX_PAYLOAD_SIZE);
-               setFlagBit(&TCPPackage, SYN_FLAG_BIT);
-               makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
-               memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
-               socket.lastWritten = 0;
+        socket->dest = *addr;
 
-               dbg(TRANSPORT_CHANNEL,"CLIENT[%hhu][%hhu]: Sending a SYN packet to Server[%hhu][%hhu]...\n",
-                    socket.src.addr, socket.src.port, socket.dest.addr, socket.dest.port);
-               if (signal Transport.send(&sendPackage) == SUCCESS) {
-                   makeOutstanding(sendPackage, RTT_ESTIMATE);
-                   socket.state = SYN_SENT;
-                   socket.lastSent = 0;
-                   //push socket back into list
-                   dbg(TRANSPORT_CHANNEL,"SUCCESSFULLY SENT SYN PACKAGE\n");
-                   error = SUCCESS;
-               }
-           }
-           else if (socket.state == SYN_SENT) {
-               // This socket has already sent a SYN packet
-               if (socket.dest.addr == addr->addr && socket.dest.port == addr->port) {
-                   // Same destination, resend the SYN packet
-                   // Send a SYN packet
-                   makeTCPPack(&TCPPackage, socket.src.port, socket.dest.port, 0, 0, 0, 0, "", TCP_PACKET_MAX_PAYLOAD_SIZE);
-                   setFlagBit(&TCPPackage, SYN_FLAG_BIT);
-                   makePack(&sendPackage, socket.src.addr, socket.dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
-                   memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
-                   if (signal Transport.send(&sendPackage) == SUCCESS) {
-                       makeOutstanding(sendPackage, RTT_ESTIMATE);
-                       error = SUCCESS;
-                   }
-               }
-               else {
-                   // If the destination is different this time, what to do?
-                   error = FAIL;
-               }
-           }
+        // Send a SYN packet
+        makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, 0, 0, 0, 0, "SYN", TCP_PACKET_MAX_PAYLOAD_SIZE);
+        setFlagBit(&TCPPackage, SYN_FLAG_BIT);
+        makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+        memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
 
-           //push socket back into list
-           call socketList.pushfront(socket);
-       }
-
-       return error;
-   }
+        dbg(TRANSPORT_CHANNEL,"CLIENT[%hhu][%hhu]: Sending a SYN packet to Server[%hhu][%hhu]...\n",
+            socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
+        
+        if (signal Transport.send(&sendPackage) == SUCCESS) {
+            makeOutstanding(sendPackage, RTT_ESTIMATE);
+            socket->state = SYN_SENT;
+            // dbg(TRANSPORT_CHANNEL,"SUCCESSFULLY SENT SYN PACKAGE\n");
+            return SUCCESS;
+        }
+        else {
+            // Failed to send a SYN package
+            return FAIL;
+        }
+    }
 
    /**
     * Closes the socket.
@@ -460,84 +428,30 @@ implementation{
     * @return error_t - returns SUCCESS if you are able change the state 
     *   to listen else FAIL.
     */
-   command error_t Transport.listen(socket_t fd){
-       socket_store_t socket;
-       bool found = FALSE;
-       error_t error;
-       dbg(TRANSPORT_CHANNEL, "Attempting to listen to socket %hhu\n", fd);
-       //will hard close fd...force change state w/o signaling the change??
-       if(call usedSockets.contains(fd)){
-           //looking for socket...
-            while(!found){
-                    socket = call socketList.popfront();
-                    if(socket.fd == fd){
-                        dbg(TRANSPORT_CHANNEL,"FOUND socket %hhu in socketList.\n", fd);
-                        found = TRUE;
-                    }else{
-                        //not it
-                        call socketList.pushback(socket);
-                    }
-                }
-            //Found it, check for active connection and change states.
-            //NOTE: 0 REFERS TO AN OPEN SOCKET, NOT A SOCKET WITH AN ESTABLISHED CONNECTION
-           if(call usedSockets.get(fd) != 0){
-                dbg(TRANSPORT_CHANNEL,"socket %hhu is in use, force closing...\n", fd);
-                //remove indicator of established connection
-                call usedSockets.set(fd, 0);
-           }
-           //changing socket to LISTEN
-            socket.state = LISTEN;
-            socket.dest.port = 0;
-            socket.dest.addr = 0;
-            call socketList.pushfront(socket);//pushing data back into list
-            dbg(TRANSPORT_CHANNEL, "Changed socket state to LISTEN(%hhu)\n", socket.state);
-           dbg(TRANSPORT_CHANNEL,"Starting timer to listen for connections...\n");
-           listenFd = fd;
-           //will check for connection to accept every 5 sSending packet fromeconds
-           call listenTimer.startPeriodic(5000);
-           error = SUCCESS;
-           return error;
-       }
-       else{
-           // Shouldn't we do nothing if the specified socket is not being used?
-           dbg(TRANSPORT_CHANNEL, "Failed to listen to socket %hhu as it is not being used\n", fd);
-           error = FAIL;
-           return error;
+    command error_t Transport.listen(socket_t fd){
+        socket_store_t* socket;
 
-        //    dbg(TRANSPORT_CHANNEL,"Socket %hhu is not in use. Looking for it in socketList..\n", fd);
-        //    //not in usedSockets, fresh connection
-        //    while(!found){
-        //        socket = call socketList.front();
-        //        if(socket.fd == fd){
-        //            //found it, change state and clear data
-        //            socket.state = LISTEN;
-        //            found = TRUE;
-        //            //dbg(TRANSPORT_CHANNEL,"FOUND and switched state to LISTEN...\n");
-        //        }
-        //        //not it
-        //        call socketList.popfront();
-        //        call socketList.pushback(socket);
-        //    }
-        //    dbg(TRANSPORT_CHANNEL,"Starting timer to listen for connections...\n");
-        //    listenFd = fd;
-        //    //will check for connection to accept every 5 seconds
-        //    call listenTimer.startPeriodic(5000);
-        //    error = SUCCESS;
-        //    return error;
-       }
-       listenFd = NULL_SOCKET;
-       dbg(TRANSPORT_CHANNEL,"Failed to listen to socket %hhu...\n", fd);
-       error = FAIL;
-       return error;
-   }
+        dbg(TRANSPORT_CHANNEL, "Attempting to listen to socket %hhu\n", fd);
 
-   /*  TIMER FUNCTIONS */
-   event void listenTimer.fired(){
-       if(listenFd != NULL_SOCKET){
-           //attempt to connect with the listening socket
-           call Transport.accept(listenFd);
-       }
-   }
+        // Get the specified socket
+        socket = getSocketPtr(fd);
+
+        if (socket == NULL) {
+            // The specified socket does not exist
+            return FAIL;
+        }
+        else if (socket->state != CLOSED) {
+            // The specified socket is not currently idle
+            return FAIL;
+        }
+
+        // Change socket state to LISTEN
+        socket->state = LISTEN;
+        socket->dest.port = 0;
+        socket->dest.addr = 0;
+        
+        return SUCCESS;
+    }
 
     event void resendTimer.fired() {
         // When this timer fires, resend the earliest outstanding packet

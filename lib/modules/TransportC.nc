@@ -9,11 +9,8 @@ configuration TransportC{
 implementation{
     components TransportP;
     Transport = TransportP;
-    components new TimerMilliC() as lTimer;
+    
     components RandomC as Random;
-
-    //Timers
-    TransportP.listenTimer -> lTimer;
     TransportP.Random -> Random;
     
     //Lists
