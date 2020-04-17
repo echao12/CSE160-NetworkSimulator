@@ -186,6 +186,7 @@ implementation{
         dbg(TRANSPORT_CHANNEL, "Transport Module: \nNODE(%hhu) RECIEVED TCP Packet seq#(%hhu)\n", TOS_NODE_ID, package->seq);
         extractTCPPack(package, &TCPPackage);
         logTCPPack(&TCPPackage);
+        
 
         // Check if this packet is intended for one of the sockets
         numSockets = call socketList.size();
@@ -273,8 +274,8 @@ implementation{
                     socket->state = ESTABLISHED;
                     //adjust usedSocket value
                     call usedSockets.set(socket->fd, 1);
-                    dbg(TRANSPORT_CHANNEL, "\nSOCKET[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
-                    socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
+                    dbg(TRANSPORT_CHANNEL, "\n**SOCKET(%hhu) [%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED**\n",
+                        socket->fd, socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
                     error = SUCCESS;
                 }
             }
@@ -290,8 +291,8 @@ implementation{
                 socket->state = ESTABLISHED;  // Change state to ESTABLISHED no matter what
                 //adjust usedSocket Map value
                 call usedSockets.set(socket->fd, 1);//1 is established, 0 is not
-                dbg(TRANSPORT_CHANNEL, "\nSOCKET[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
-                    socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
+                dbg(TRANSPORT_CHANNEL, "\n**SOCKET(%hhu) [%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED**\n",
+                    socket->fd, socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
                 acknowledgePacket(package);
                 //Send effective window
                 //Send effective window to client
@@ -312,7 +313,7 @@ implementation{
             //received a packet, update info
             socket->lastRcvd = TCPPackage.byteSeq;
             socket->nextExpected = TCPPackage.byteSeq + 1;
-            acknowledgePacket(package);//packet received
+            
             dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: ESTABLISHED\n");
             // Drop any SYN packet
             if (checkFlagBit(&TCPPackage, SYN_FLAG_BIT)) {
@@ -322,10 +323,14 @@ implementation{
                 dbg(TRANSPORT_CHANNEL, "Recieved ACK Packet.\t");
                 dbg(TRANSPORT_CHANNEL, "AdvertiseWindow size(%hhu)\n", TCPPackage.advertisedWindow);
                 if(TCPPackage.advertisedWindow != socket->effectiveWindow){
+                    acknowledgePacket(package);//packet received
                     dbg(TRANSPORT_CHANNEL,"Adjusted effectiveWindow(%hhu) to match advertisedWindow(%hhu)...\n", socket->effectiveWindow, TCPPackage.advertisedWindow);
                     socket->effectiveWindow = TCPPackage.advertisedWindow;
                 }
 
+            }else if(checkFlagBit(&TCPPackage, FIN_FLAG_BIT)){
+                dbg(TRANSPORT_CHANNEL, "Recieved FIN Packet.\nLink: [%hhu][%hhu]<----->[%hhu][%hhu]\nSTARTING DISCONNECTION...\n",
+                socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
             }else if(TCPPackage.flags == 0){
 
             }
@@ -436,7 +441,29 @@ implementation{
     * @return socket_t - returns SUCCESS if you are able to attempt
     *    a closure with the fd passed, else return FAIL.
     */
-   command error_t Transport.close(socket_t fd){}
+   command error_t Transport.close(socket_t fd){
+       error_t error;
+       socket_store_t *socket;
+       socket = getSocketPtr(fd);
+       //ensure that fs isn't null
+       if(fd != NULL_SOCKET){
+           //send the FIN packet
+            makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, socket->lastSent+1, socket->nextExpected, 0, 0, "FIN", TCP_PACKET_MAX_PAYLOAD_SIZE);
+            TCPPackage.flags = 0;//reset flags
+            setFlagBit(&TCPPackage, FIN_FLAG_BIT);
+            makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+            memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+            if(signal Transport.send(&sendPackage) == SUCCESS){
+                socket->state = FIN_WAIT_1;
+                makeOutstanding(sendPackage, RTT_ESTIMATE);
+                socket->lastSent++;
+            }
+            error = SUCCESS;
+       }else{
+           error = FAIL;
+       }
+       return error;
+   }
 
    /**
     * A hard close, which is not graceful. This portion is optional.
@@ -481,6 +508,36 @@ implementation{
         socket->dest.addr = 0;
         
         return SUCCESS;
+    }
+
+    //to find fd of socket with address info
+    command socket_t Transport.findSocket(socket_addr_t *srcAddr, socket_addr_t *destAddr){
+        socket_t socketNum;
+        bool found = FALSE;
+        uint8_t count = 0;
+        socket_store_t socket;
+        dbg(TRANSPORT_CHANNEL,"Looking for Socket!\n");
+        if(srcAddr != NULL && destAddr != NULL){
+            while(!found && count < MAX_NUM_OF_SOCKETS){
+                socket = call socketList.popfront();
+                if(socket.src.addr == srcAddr->addr && socket.src.port == srcAddr->port){
+                    if(socket.dest.addr == destAddr->addr){
+                        //matches
+                        socketNum = socket.fd;
+                        found = TRUE;
+                    }else{
+                        //no match
+                        socketNum = NULL_SOCKET;
+                    }
+                }
+                //push back data
+                call socketList.pushback(socket);
+                count++;
+            }
+        }else{
+            socketNum = NULL_SOCKET;
+        }
+        return socketNum;
     }
 
     event void resendTimer.fired() {

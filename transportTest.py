@@ -38,6 +38,8 @@ def main():
     #s.testClient(5, 100, 1, 200, 10);
     #s.runTime(1);
     s.runTime(1000);
+    s.closeClient(4,1,200,100);
+    s.runTime(500);
 
 if __name__ == '__main__':
     main()

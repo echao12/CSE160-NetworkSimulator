@@ -422,6 +422,28 @@ implementation{
       }
    }
 
+   event void CommandHandler.closeClient(uint16_t destination, uint16_t sourcePort, uint16_t destPort){
+      socket_t socket;
+      socket_addr_t srcAddr, destAddr;
+      srcAddr.addr = TOS_NODE_ID;
+      srcAddr.port = sourcePort;
+      destAddr.addr = destination;
+      destAddr.port = destPort;
+
+      dbg(TRANSPORT_CHANNEL, "CLIENT[%hhu][%hhu] IS REQUESTING TO CLOSE CONNECTION TO SERVER[%hhu][%hhu]\n",
+      TOS_NODE_ID, sourcePort, destination, destPort);
+      
+      socket = call Transport.findSocket(&srcAddr, &destAddr);
+      if(socket != NULL_SOCKET){
+         dbg(TRANSPORT_CHANNEL, "SUCCESS: Socket(%hhu) Found!\n", socket);
+      }else{
+         dbg(TRANSPORT_CHANNEL, "ERROR: Socket not found...\n");
+      }
+      //got the socket, time to invoke close
+      call Transport.close(socket);
+
+   }
+
    event void TCPWriteTimer.fired() {
       // Create an array and fill it with numbers
       uint8_t buff[SOCKET_BUFFER_SIZE];

@@ -15,6 +15,7 @@ class TestSim:
     CMD_ROUTE_DUMP = 3
     CMD_TEST_CLIENT = 4
     CMD_TEST_SERVER = 5
+    CMD_CLOSE_CLIENT = 6
     CMD_BROADCAST = 7
     CMD_FLOOD = 8
 
@@ -139,7 +140,10 @@ class TestSim:
         self.sendCMD(self.CMD_TEST_CLIENT, source, "{0}{1}{2}{3}".format(chr(destination), chr(source_port), chr(destination_port), chr(transfer)))
 
     def testServer(self, address, port):
-        self.sendCMD(self.CMD_TEST_SERVER, address, "{0}".format(chr(port)))
+        self.sendCMD(self.CMD_TEST_SERVER, address, "{0}".format(chr(port)));
+    
+    def closeClient(self, client, destination, source_port, destination_port):
+        self.sendCMD(self.CMD_CLOSE_CLIENT, client, "{0}{1}{2}".format(chr(destination), chr(source_port), chr(destination_port)));
 
     def addChannel(self, channelName, out=sys.stdout):
         print 'Adding Channel', channelName;

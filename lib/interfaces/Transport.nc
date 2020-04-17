@@ -155,4 +155,7 @@ interface Transport{
     *   to listen else FAIL.
     */
    command error_t listen(socket_t fd);
+
+   //finds the file descriptor for the socket
+   command socket_t findSocket(socket_addr_t *srcAddr, socket_addr_t *destAddr);
 }
