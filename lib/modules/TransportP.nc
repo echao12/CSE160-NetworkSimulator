@@ -106,7 +106,22 @@ implementation{
     *    a destination associated with the destination address and port.
     *    if not return a null socket.
     */
-   command socket_t Transport.accept(socket_t fd){}
+    command socket_t Transport.accept(socket_t fd) {
+        socket_store_t* currentSocket;
+        socket_t newSocketFD;
+
+        if (call socketList.isFull()) {
+            // Can't add any more socket
+            return NULL_SOCKET;
+        }
+        else {
+            // Create a copy of the current socket and return that socket's fd
+            currentSocket = getSocketPtr(fd);
+            newSocketFD = call Transport.socket();
+            call Transport.bind(newSocketFD, &currentSocket->src);
+            return newSocketFD;
+        }
+    }
 
    /**
     * Write to the socket from a buffer. This data will eventually be
@@ -163,6 +178,7 @@ implementation{
     */
     command error_t Transport.receive(pack* package){
         socket_store_t* socket = NULL;
+        socket_t socketFD;
         uint16_t i, numSockets;
         error_t error;
         uint8_t windowSize = 1;
@@ -196,12 +212,29 @@ implementation{
             //check for a SYN msg
             if(checkFlagBit(&TCPPackage, SYN_FLAG_BIT)){
                 dbg(TRANSPORT_CHANNEL, "RECEIVED SYN PACKET(sender seq#: %hhu)\nREPLYING with SYN/ACK TCP Packet\n", package->seq);
+                
+                // Try to create a new socket for the connection
+                socketFD = call Transport.accept(socket->fd);
+                
+                if (socketFD == NULL_SOCKET) {
+                    // Failed to create a new socket
+                    return FAIL;
+                }
+                
+                // Switch over to the new socket
+                socket = getSocketPtr(socketFD);
+
+                // Not sure about this one, but the new socket shouldn't have the same port as the old one
+                socket->src.port += 1;
+
                 //record packet source as this port's destination
                 socket->dest.addr = package->src;
                 socket->dest.port = TCPPackage.srcPort;
+
                 //record sequence#
                 socket->lastRcvd = TCPPackage.byteSeq;
                 socket->nextExpected = TCPPackage.byteSeq + 1;
+
                 //generate SYN packet with ack, recall 4th argument is byteSeq;
                 makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, 0, socket->nextExpected, 0, 0, "SYN_REPLY", TCP_PACKET_MAX_PAYLOAD_SIZE);
                 setFlagBit(&TCPPackage, SYN_FLAG_BIT);
@@ -224,6 +257,7 @@ implementation{
             if (checkFlagBit(&TCPPackage, SYN_FLAG_BIT) && checkFlagBit(&TCPPackage, ACK_FLAG_BIT)) {
                 //the packet's ACK value is the expecting value
                 dbg(TRANSPORT_CHANNEL, "RECEIVED SYN+ACK PACKET\nREPLYING with ACK TCP Packet\n");
+                socket->dest.port = TCPPackage.srcPort;  // Change dest.port to match the receiver's new socket
                 socket->lastAck = TCPPackage.acknowledgement - 1;//(NOT SURE ABOUT THIS YET) i think it should be the packet's ack #
                 socket->nextExpected = TCPPackage.byteSeq + 1;
                 // Make ACK packet with reciever's byteSeq+1 val

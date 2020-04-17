@@ -449,6 +449,8 @@ implementation{
    }
 
    event void TCPReadTimer.fired() {
+      // TODO: Figure out what to do in case there are multiple receiver sockets
+
       uint8_t buff[SOCKET_BUFFER_SIZE];
       uint16_t i, num, numbersRead;
 
