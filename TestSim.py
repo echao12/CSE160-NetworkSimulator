@@ -18,6 +18,11 @@ class TestSim:
     CMD_CLOSE_CLIENT = 6
     CMD_BROADCAST = 7
     CMD_FLOOD = 8
+    CMD_HELLO = 11
+    CMD_MESSAGE = 12
+    CMD_WHISPER = 13
+    CMD_LISTUSR = 14
+    
 
     # CHANNELS - see includes/channels.h
     COMMAND_CHANNEL="command";
@@ -35,6 +40,7 @@ class TestSim:
 
     # Personal Debuggin Channels for some of the additional models implemented.
     HASHMAP_CHANNEL="hashmap";
+    APPLICATION_CHANNEL="application";
 
     # Initialize Vars
     numMote=0
@@ -144,6 +150,18 @@ class TestSim:
     
     def closeClient(self, client, destination, source_port, destination_port):
         self.sendCMD(self.CMD_CLOSE_CLIENT, client, "{0}{1}{2}".format(chr(destination), chr(source_port), chr(destination_port)));
+
+    def hello(self, source, username, client_port):
+        self.sendCMD(self.CMD_HELLO, source, "{0}{1}".format(username, chr(client_port)));
+
+    def message(self, source, message):
+        self.sendCMD(self.CMD_MESSAGE, source, "{0}".format(message));
+
+    def whisper(self, source, dest_username, message):
+        self.sendCMD(self.CMD_WHISPER, source, "{0}{1}".format(dest_username, message));
+    
+    def listusr(self, source):
+        self.sendCMD(self.CMD_LISTUSR, source, "list users");
 
     def addChannel(self, channelName, out=sys.stdout):
         print 'Adding Channel', channelName;

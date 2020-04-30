@@ -445,6 +445,33 @@ implementation{
 
    }
 
+   // sends a hello msg to server to establish a chat profile
+   // should send TCP packet with data: "hello <usrname>" to server
+   event void CommandHandler.hello(char* user, uint16_t clientPort){
+      //port and server node is predetermined to be ID[1] P[41]
+      socket_t socket;
+      socket_addr_t sourceAddress, destinationAddress;
+      dbg(APPLICATION_CHANNEL,"CLIENT[%hhu][%hhu] sending hello to [%hhu][%hhu]...\n", TOS_NODE_ID, clientPort, 1, 41);
+      //generate a socket
+      sourceAddress.addr = TOS_NODE_ID;
+      sourceAddress.port = clientPort;
+      destinationAddress.addr = 1;
+      destinationAddress.port = 41;
+
+      socket = call Transport.socket();
+      if(call Transport.bind(socket, &sourceAddress) == SUCCESS) {
+         call Transport.connect(socket, &destinationAddress);
+         default_socket = socket;
+         call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);
+      }
+   }
+   
+   event void CommandHandler.message(char *msg){dbg(APPLICATION_CHANNEL, "Sending message...\n");}
+
+   event void CommandHandler.whisper(char *user, char *msg){dbg(APPLICATION_CHANNEL, "Sending Whisper...\n");}
+   
+   event void CommandHandler.listusr(){dbg(APPLICATION_CHANNEL, "Requesting user list...\n");}
+
    event void TCPWriteTimer.fired() {
       // Create an array and fill it with numbers
       uint8_t buff[SOCKET_BUFFER_SIZE];

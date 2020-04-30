@@ -13,4 +13,9 @@ interface CommandHandler{
    event void setAppServer();
    event void setAppClient();
    event void closeClient( uint16_t destination, uint16_t srcPort, uint16_t destPort);
+   event void hello(char*, uint16_t clientPort);
+   event void message(char *msg);
+   event void whisper(char *user, char *msg);
+   event void listusr();
+
 }
