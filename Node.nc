@@ -7,6 +7,8 @@
  *
  */
 #include <Timer.h>
+#include <string.h>
+#include<stdio.h> 
 #include "includes/command.h"
 #include "includes/packet.h"
 #include "includes/CommandMsg.h"
@@ -54,6 +56,7 @@ implementation{
    // TCP-related variables
    socket_t default_socket = NULL_SOCKET;
    uint16_t numbersToTransfer = 0, numbersWrittenSoFar = 0;
+   char username[SOCKET_BUFFER_SIZE], messageBuff[SOCKET_BUFFER_SIZE];
 
    // Prototypes
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
@@ -452,6 +455,15 @@ implementation{
       socket_t socket;
       socket_addr_t sourceAddress, destinationAddress;
       dbg(APPLICATION_CHANNEL,"CLIENT[%hhu][%hhu] sending hello to [%hhu][%hhu]...\n", TOS_NODE_ID, clientPort, 1, 41);
+      //assign username to this node
+      memset(username, '\0', SOCKET_BUFFER_SIZE);
+      memcpy(username, user, strlen(user)-1);//i dont know where the carriage return is coming from, removing it
+      dbg(APPLICATION_CHANNEL, "username set: %s\n", username);
+      //generate msg
+      memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
+      sprintf(messageBuff, "Hello %s %hhu\r\n", username, clientPort);
+      dbg(APPLICATION_CHANNEL, "HELLO MESSAGE: %s\n", messageBuff);
+      
       //generate a socket
       sourceAddress.addr = TOS_NODE_ID;
       sourceAddress.port = clientPort;
@@ -475,6 +487,7 @@ implementation{
    event void TCPWriteTimer.fired() {
       // Create an array and fill it with numbers
       uint8_t buff[SOCKET_BUFFER_SIZE];
+      //going to send messages now, make them chars
       uint16_t i, num, numbersToWrite;
 
       numbersToWrite = numbersToTransfer - numbersWrittenSoFar;
