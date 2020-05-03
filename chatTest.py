@@ -20,6 +20,7 @@ def main():
     s.addChannel(s.COMMAND_CHANNEL);
     s.addChannel(s.GENERAL_CHANNEL);
     s.addChannel(s.APPLICATION_CHANNEL);
+    s.addChannel(s.P4_DBG_CHANNEL);
 
     # Give some time for the nodes to find neighbors and build routing tables
     s.runTime(1000)
@@ -29,7 +30,9 @@ def main():
     #s.runTime(1);
     #s.testServer(1, 200);#mote,port
     s.runTime(60);
-    s.hello(3, "Eric", 10);
+    s.hello(3, "Eric", 30);
+    s.runTime(60);
+    s.hello(2, "MICHAEL", 20);
     s.runTime(60);
     s.message(3, "PENTAKILL");
     s.runTime(60);

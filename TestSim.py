@@ -41,6 +41,7 @@ class TestSim:
     # Personal Debuggin Channels for some of the additional models implemented.
     HASHMAP_CHANNEL="hashmap";
     APPLICATION_CHANNEL="application";
+    P4_DBG_CHANNEL = "p4_dbg";
 
     # Initialize Vars
     numMote=0

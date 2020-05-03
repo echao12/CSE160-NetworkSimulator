@@ -326,7 +326,7 @@ implementation{
 
                     // Adjust usedSocket value
                     call usedSockets.set(socket->fd, 1);
-                    dbg(TRANSPORT_CHANNEL, "\nSOCKET[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
+                    dbg(P4_DBG_CHANNEL, "\nSOCKET[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
                     socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
                     
                     error = SUCCESS;
@@ -350,7 +350,7 @@ implementation{
                 
                 // Adjust usedSocket Map value
                 call usedSockets.set(socket->fd, 1); //1 is established, 0 is not
-                dbg(TRANSPORT_CHANNEL, "\nSOCKET[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
+                dbg(P4_DBG_CHANNEL, "\nSOCKET[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
                     socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
                 
                 // Send an ACK packet to the client, it doesn't matter if this ACK packet reaches the client or not
@@ -749,7 +749,7 @@ implementation{
         if (signal Transport.send(&sendPackage) == SUCCESS) {
             makeOutstanding(sendPackage, RTT_ESTIMATE);
             socket->state = SYN_SENT;
-            // dbg(TRANSPORT_CHANNEL,"SUCCESSFULLY SENT SYN PACKAGE\n");
+             dbg(TRANSPORT_CHANNEL,"SUCCESSFULLY SENT SYN PACKAGE\n");
             return SUCCESS;
         }
         else {
@@ -834,6 +834,7 @@ implementation{
         socket->dest.port = 0;
         socket->dest.addr = 0;
         
+        dbg(P4_DBG_CHANNEL, "Listening at Addr[%hhu]:Port[%hhu] %hhu\n", socket->src.addr, socket->src.port);
         return SUCCESS;
     }
 

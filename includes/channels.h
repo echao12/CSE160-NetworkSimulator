@@ -19,4 +19,5 @@ char TRANSPORT_CHANNEL[]="transport";
 // Personal Debuggin Channels for some of the additional models implemented.
 char HASHMAP_CHANNEL[]="hashmap";
 char APPLICATION_CHANNEL[]="application";
+char P4_DBG_CHANNEL[]="p4_dbg";
 #endif

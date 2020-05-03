@@ -476,6 +476,8 @@ implementation{
          default_socket = socket;
          call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);
       }
+      dbg(APPLICATION_CHANNEL, "Attempting to connect from hello...\n");
+      call Transport.connect(socket, &destinationAddress);
    }
    
    event void CommandHandler.message(char *msg){dbg(APPLICATION_CHANNEL, "Sending message...\n");}
@@ -509,6 +511,38 @@ implementation{
       // Ask the Transport module to write as much as it can
       i = call Transport.write(default_socket, buff, numbersToWrite*2);
       numbersWrittenSoFar += i/2;
+      /*    
+            IGNORE THIS FOR NOW, DECIDED TO SAVE IT BUT NEED TO FINISH 
+            SERVER CONNECTION ESTABLISHMENT FIRST
+
+            // Create an array and fill it with numbers
+      uint8_t buff[SOCKET_BUFFER_SIZE];
+      //going to send messages now, make them chars
+      uint16_t i, num, numbersToWrite;//numbers will be letters
+
+      numbersToWrite = numbersToTransfer - numbersWrittenSoFar;
+      if (numbersToWrite == 0) {
+         // All numbers have been written
+         return;
+      }
+      //else if (numbersToWrite > SOCKET_BUFFER_SIZE/2) {
+      else if (numbersToWrite > SOCKET_BUFFER_SIZE) {
+         // Limit the amount of numbers written to the maximum space available
+         numbersToWrite = SOCKET_BUFFER_SIZE;
+      }
+
+      
+      // Fill the array with numbers
+      //for (i = 0; i < numbersToWrite; i++) {
+      //   num = numbersWrittenSoFar + i + 1;
+      //   memcpy(&buff[i*2], &num, 2);
+      //}
+      
+      // Ask the Transport module to write as much as it can
+      //i = call Transport.write(default_socket, buff, numbersToWrite*2);
+      i = call Transport.write(default_socket, messageBuff, numbersToWrite);
+      numbersWrittenSoFar += i;
+      */
    }
 
    event void TCPReadTimer.fired() {
