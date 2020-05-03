@@ -163,7 +163,8 @@ implementation{
     command uint16_t Transport.write(socket_t fd, uint8_t *buff, uint16_t bufflen){
         socket_store_t* socket;
         uint16_t i, bytePos, bytesWritten;
-        
+        char letter;
+        //dbg(APPLICATION_CHANNEL, "Writing to sendBuffer...\n");
         // Get the specified socket
         socket = getSocketPtr(fd);
 
@@ -185,6 +186,7 @@ implementation{
             bytePos = increaseByteSeq(bytePos, 1);
             if (socket->sendBuff[bytePos] == 0) {
                 // This position of the send buffer is empty, fill it
+                dbg(P4_DBG_CHANNEL, "Writting [%hhu]->[%c] to buffer[%hhu]\n", buff[i],buff[i], i);
                 socket->sendBuff[bytePos] = buff[i];
                 bytesWritten++;
                 socket->lastWritten = bytePos;

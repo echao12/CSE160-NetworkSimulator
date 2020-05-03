@@ -56,7 +56,8 @@ implementation{
    // TCP-related variables
    socket_t default_socket = NULL_SOCKET;
    uint16_t numbersToTransfer = 0, numbersWrittenSoFar = 0;
-   char username[SOCKET_BUFFER_SIZE], messageBuff[SOCKET_BUFFER_SIZE];
+   uint16_t msgPosition[MAX_NUM_OF_SOCKETS];
+   char username[SOCKET_BUFFER_SIZE], messageBuff[SOCKET_BUFFER_SIZE], fullMessageBuffer[MAX_NUM_OF_SOCKETS][SOCKET_BUFFER_SIZE];
 
    // Prototypes
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
@@ -70,6 +71,10 @@ implementation{
       call AMControl.start();//start radio
 
       dbg(GENERAL_CHANNEL, "(%hhu)Booted\n", TOS_NODE_ID);
+
+      //memset(&fullMessageBuffer,'\0', SOCKET_BUFFER_SIZE);
+      memset(&messageBuff,'\0', SOCKET_BUFFER_SIZE);
+      memset(&username,'\0', SOCKET_BUFFER_SIZE);
 
       // Set timer for sending packets
       call packetsTimer.startPeriodic(200 + (call Random.rand16() % 50));
@@ -216,6 +221,10 @@ implementation{
          pack* myMsg=(pack*) payload;
          dbg(FLOODING_CHANNEL, "Packet Origin: %hhu\n", myMsg->src);
          // dbg(GENERAL_CHANNEL, "Package Payload: %s\n", myMsg->payload);
+         if(myMsg->seq < currentSequence - 100){
+            //dbg(P4_DBG_CHANNEL, "Packet out of date...\n");
+            return msg;
+         }
          
          if(myMsg->protocol == PROTOCOL_PING){
             dbg(ROUTING_CHANNEL, "Ping packet received\n");
@@ -462,7 +471,8 @@ implementation{
       //generate msg
       memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
       sprintf(messageBuff, "Hello %s %hhu\r\n", username, clientPort);
-      dbg(APPLICATION_CHANNEL, "HELLO MESSAGE: %s\n", messageBuff);
+      numbersToTransfer = strlen(messageBuff);
+      dbg(APPLICATION_CHANNEL, "HELLO MESSAGE[%hhu]: %s\n", numbersToTransfer, messageBuff);
       
       //generate a socket
       sourceAddress.addr = TOS_NODE_ID;
@@ -472,12 +482,12 @@ implementation{
 
       socket = call Transport.socket();
       if(call Transport.bind(socket, &sourceAddress) == SUCCESS) {
+         dbg(APPLICATION_CHANNEL, "Attempting to connect from hello...\n");
          call Transport.connect(socket, &destinationAddress);
          default_socket = socket;
          call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);
       }
-      dbg(APPLICATION_CHANNEL, "Attempting to connect from hello...\n");
-      call Transport.connect(socket, &destinationAddress);
+      //call Transport.connect(socket, &destinationAddress);
    }
    
    event void CommandHandler.message(char *msg){dbg(APPLICATION_CHANNEL, "Sending message...\n");}
@@ -487,6 +497,7 @@ implementation{
    event void CommandHandler.listusr(){dbg(APPLICATION_CHANNEL, "Requesting user list...\n");}
 
    event void TCPWriteTimer.fired() {
+      /*
       // Create an array and fill it with numbers
       uint8_t buff[SOCKET_BUFFER_SIZE];
       //going to send messages now, make them chars
@@ -511,15 +522,16 @@ implementation{
       // Ask the Transport module to write as much as it can
       i = call Transport.write(default_socket, buff, numbersToWrite*2);
       numbersWrittenSoFar += i/2;
-      /*    
-            IGNORE THIS FOR NOW, DECIDED TO SAVE IT BUT NEED TO FINISH 
-            SERVER CONNECTION ESTABLISHMENT FIRST
+      */
+          
+            //IGNORE THIS FOR NOW, DECIDED TO SAVE IT BUT NEED TO FINISH 
+            //SERVER CONNECTION ESTABLISHMENT FIRST
 
             // Create an array and fill it with numbers
-      uint8_t buff[SOCKET_BUFFER_SIZE];
+      //uint8_t buff[SOCKET_BUFFER_SIZE];
       //going to send messages now, make them chars
       uint16_t i, num, numbersToWrite;//numbers will be letters
-
+      //dbg(APPLICATION_CHANNEL, "TCPWriteTimer Fired!...\n");
       numbersToWrite = numbersToTransfer - numbersWrittenSoFar;
       if (numbersToWrite == 0) {
          // All numbers have been written
@@ -542,12 +554,14 @@ implementation{
       //i = call Transport.write(default_socket, buff, numbersToWrite*2);
       i = call Transport.write(default_socket, messageBuff, numbersToWrite);
       numbersWrittenSoFar += i;
-      */
+      
    }
 
    event void TCPReadTimer.fired() {
-      uint8_t buff[SOCKET_BUFFER_SIZE];
-      uint16_t i, j, num, numbersRead, numSockets;
+      //uint8_t buff[SOCKET_BUFFER_SIZE];
+      char buff[SOCKET_BUFFER_SIZE];
+      uint16_t i, j, k, num, numbersRead, numSockets;
+      char letter;
       socket_t fd;
 
       numSockets = call socketList.size();
@@ -555,13 +569,27 @@ implementation{
          fd = call socketList.get(i);
 
          // Read the socket's buffer
-         numbersRead = call Transport.read(fd, buff, SOCKET_BUFFER_SIZE) / 2;
-
+         //numbersRead = call Transport.read(fd, buff, SOCKET_BUFFER_SIZE) / 2;
+         numbersRead = call Transport.read(fd, buff, SOCKET_BUFFER_SIZE);
+         if(numbersWrittenSoFar != 0){
+            dbg(P4_DBG_CHANNEL, "letters written so far: %hhu\n", numbersWrittenSoFar);
+         }
          // Print out the numbers
+         k = msgPosition[fd];
          for (j = 0; j < numbersRead; j++) {
-            memcpy(&num, &buff[j*2], 2);
-            dbg(GENERAL_CHANNEL, "Received number: %hhu\n", num);
-         }  
+            memcpy(&letter, &buff[j], 1);
+            dbg(GENERAL_CHANNEL, "Received letter: %c\twriting to buffer[%hhu + %hhu]\n", letter, k, j);
+            fullMessageBuffer[fd][k+j] = buff[j];
+            msgPosition[fd]++;
+            if(buff[j] == '\r' && buff[j+1] == '\n'){
+               fullMessageBuffer[fd][k+j+1] = buff[j+1];
+               j++;
+               dbg(P4_DBG_CHANNEL, "\nEND OF MSG DETECTED!\n[\\r]&&[\\n]\nMsg Stored: %s\n\n", fullMessageBuffer[fd]);
+               //end of message, reset values
+               msgPosition[fd] = 0;
+               memset(fullMessageBuffer[fd], '\0', SOCKET_BUFFER_SIZE);
+            }
+         }
       }
    }
 
@@ -572,7 +600,7 @@ implementation{
    event error_t Transport.send(pack* package){
       //update the packet seq number
       package->seq = currentSequence + 1;
-      dbg(TRANSPORT_CHANNEL, "Sending packet from (%hhu) to (%hhu)\n", package->src, package->dest);
+      //dbg(P4_DBG_CHANNEL, "Sending packet from (%hhu) to (%hhu) payload: %c\n", package->src, package->dest, package->payload);
       call packetsQueue.pushback(*package);
       incrementSequence();
       return SUCCESS;

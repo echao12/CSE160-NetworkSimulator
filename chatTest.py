@@ -31,7 +31,7 @@ def main():
     #s.testServer(1, 200);#mote,port
     s.runTime(60);
     s.hello(3, "Eric", 30);
-    s.runTime(60);
+    s.runTime(1060);
     s.hello(2, "MICHAEL", 20);
     s.runTime(60);
     s.message(3, "PENTAKILL");
