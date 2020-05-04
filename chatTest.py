@@ -32,12 +32,14 @@ def main():
     s.runTime(60);
     s.hello(3, "Eric", 30);
     s.runTime(1060);
-    s.hello(2, "MICHAEL", 20);
-    s.runTime(60);
+    s.hello(2, "Michael", 20);
+    s.runTime(600);
     s.message(3, "PENTAKILL");
-    s.runTime(60);
-    s.whisper(3, "Michael", "MID MIA");
-    s.runTime(60);
+    s.runTime(600);
+    #python, for some stupid reason, combines the 2 strings into 1...
+    #ganna use whitespace after username as delimiter
+    s.whisper(3, "Michael ", "MID MIA");
+    s.runTime(600);
     s.listusr(3);
 
     s.runTime(500);

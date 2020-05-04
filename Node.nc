@@ -499,9 +499,31 @@ implementation{
       //call Transport.connect(socket, &destinationAddress);
    }
    
+   //send message to server, which will broadcast the msg to all connected users.
    event void CommandHandler.message(char *msg){dbg(APPLICATION_CHANNEL, "Sending message...\n");}
+   //send msg to server, server will forward it to the specified user
+   //include sending client's name
+   event void CommandHandler.whisper(char *user, char *msg){
+      char *token;
+      if(default_socket != NULL){
+         //dbg(P4_DBG_CHANNEL, "Arguments: user:%s , msg:%s\n", user, msg);
+         //dbg(APPLICATION_CHANNEL, "Sending Whisper to %s...\n", user);
+         //break down the arguments
+         token = strtok(user, " ");
+         //constuct the message
+         memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
+         sprintf(messageBuff, "whisper %s %s\r\n", token, strtok(NULL,"\n"));
+         //reset values for writing since new msg
+         numbersToTransfer = strlen(messageBuff);
+         numbersWrittenSoFar = 0;
+         dbg(P4_DBG_CHANNEL, "WHISPER(%hhu): %s\n",numbersToTransfer, messageBuff);
+         call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);//resert timer to write.
+      }else{
+         dbg(APPLICATION_CHANNEL, "NO CONNECTION ESTABLISHED...\n");
+      }
+      
 
-   event void CommandHandler.whisper(char *user, char *msg){dbg(APPLICATION_CHANNEL, "Sending Whisper...\n");}
+   }
    
    event void CommandHandler.listusr(){dbg(APPLICATION_CHANNEL, "Requesting user list...\n");}
 
@@ -622,7 +644,7 @@ implementation{
    }
 
    void messageHandler(socket_t fd){
-      char *iterator = NULL, *token = NULL;
+      char *iterator = NULL, *token = NULL, *temp = NULL;
       char tempMessage[SOCKET_BUFFER_SIZE];
       uint32_t keys, i;
       memcpy(tempMessage, fullMessageBuffer[fd], SOCKET_BUFFER_SIZE);
@@ -634,6 +656,11 @@ implementation{
          token = strtok(NULL, " ");//get next token (username)
          dbg(P4_DBG_CHANNEL, "Found \"hello\"!\nMapping socket[%hhu] to value[%s]\n", fd, token);
          memcpy(connectedUsers[fd], token, strlen(token)+1);
+      }
+      if(strcmp(token, "whisper") == 0){
+         token = strtok(NULL, " ");
+         temp = strtok(NULL,"");
+         dbg(P4_DBG_CHANNEL, "Found \"whisper\" from %s to %s\nMSG:%s\n", connectedUsers[fd], token, temp);
       }
       //"msg", broadcast message to all users connected
       //"whisper", send message to specified username

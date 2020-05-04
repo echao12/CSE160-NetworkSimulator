@@ -26,6 +26,7 @@ implementation{
             uint8_t* buff;
             message_t *raw_msg;
             void *payload;
+            uint16_t i = 0;
 
             // Pop message out of queue.
             raw_msg = call Queue.dequeue();
@@ -98,7 +99,11 @@ implementation{
                 break;
             case CMD_HELLO:
                 dbg(COMMAND_CHANNEL, "Command Type: HELLO\n");
-                signal CommandHandler.hello(&buff[0], buff[1]);
+                for(i = 0; i < sizeof(CommandMsg); i++){
+                    if(buff[i] == '\0')
+                        break;
+                }
+                signal CommandHandler.hello(&buff[0], buff[i-1]);
                 break;
             case CMD_MESSAGE:
                 dbg(COMMAND_CHANNEL, "Command Type: MSG\n");
@@ -106,7 +111,7 @@ implementation{
                 break;
             case CMD_WHISPER:
                 dbg(COMMAND_CHANNEL, "Command Type: WHISPER\n");
-                signal CommandHandler.whisper(&buff[0], &buff[1]);
+                signal CommandHandler.whisper(&buff[0], &buff[1]);//note that buff[0] is first letter, buff[1] is 2nd letter.
                 break;
             case CMD_LISTUSR:
                 dbg(COMMAND_CHANNEL, "Command Type: ListUsr\n");
