@@ -35,6 +35,8 @@ implementation {
     Node.neighborMap -> hmap;
     components new HashmapC(uint16_t, MAX_NEIGHBORS_SIZE) as aNeighbor;
     Node.activeNeighbors -> aNeighbor;
+    //components new HashmapC(char*, MAX_NUM_OF_SOCKETS) as users;
+    //Node.userMap -> users;
     
     components new ListC(pack, MAX_CACHE_SIZE) as CacheC;
     Node.Cache -> CacheC;

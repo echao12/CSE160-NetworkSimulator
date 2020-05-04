@@ -30,6 +30,7 @@ module Node{
    
    uses interface Hashmap<uint16_t> as neighborMap;
    uses interface Hashmap<uint16_t> as activeNeighbors;
+   //uses interface Hashmap<char*> as userMap;
 
    uses interface List<pack> as Cache;
 
@@ -47,6 +48,7 @@ module Node{
    uses interface Timer<TMilli> as TCPWriteTimer;
    uses interface Timer<TMilli> as TCPReadTimer;
    uses interface List<socket_t> as socketList;
+
 }
 
 implementation{
@@ -58,16 +60,19 @@ implementation{
    uint16_t numbersToTransfer = 0, numbersWrittenSoFar = 0;
    uint16_t msgPosition[MAX_NUM_OF_SOCKETS];
    char username[SOCKET_BUFFER_SIZE], messageBuff[SOCKET_BUFFER_SIZE], fullMessageBuffer[MAX_NUM_OF_SOCKETS][SOCKET_BUFFER_SIZE];
+   char connectedUsers[MAX_NUM_OF_SOCKETS][SOCKET_BUFFER_SIZE];
 
    // Prototypes
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
    bool checkCache(pack *Package);
    void incrementSequence();
    void updateNeighbors(uint16_t src);
+   void messageHandler(socket_t fd);
 
    //TinyOS Boot sequence completed, each mote calls this function.
    event void Boot.booted(){
 
+      uint8_t i = 0;
       call AMControl.start();//start radio
 
       dbg(GENERAL_CHANNEL, "(%hhu)Booted\n", TOS_NODE_ID);
@@ -75,6 +80,10 @@ implementation{
       //memset(&fullMessageBuffer,'\0', SOCKET_BUFFER_SIZE);
       memset(&messageBuff,'\0', SOCKET_BUFFER_SIZE);
       memset(&username,'\0', SOCKET_BUFFER_SIZE);
+      for(i = 0; i < MAX_NUM_OF_SOCKETS; i++){
+         fullMessageBuffer[i][0] = NULL;
+         connectedUsers[i][0] = NULL;
+      }
 
       // Set timer for sending packets
       call packetsTimer.startPeriodic(200 + (call Random.rand16() % 50));
@@ -470,7 +479,7 @@ implementation{
       dbg(APPLICATION_CHANNEL, "username set: %s\n", username);
       //generate msg
       memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
-      sprintf(messageBuff, "Hello %s %hhu\r\n", username, clientPort);
+      sprintf(messageBuff, "hello %s %hhu\r\n", username, clientPort);
       numbersToTransfer = strlen(messageBuff);
       dbg(APPLICATION_CHANNEL, "HELLO MESSAGE[%hhu]: %s\n", numbersToTransfer, messageBuff);
       
@@ -585,6 +594,8 @@ implementation{
                fullMessageBuffer[fd][k+j+1] = buff[j+1];
                j++;
                dbg(P4_DBG_CHANNEL, "\nEND OF MSG DETECTED!\n[\\r]&&[\\n]\nMsg Stored: %s\n\n", fullMessageBuffer[fd]);
+               //handle full message
+               messageHandler(fd);
                //end of message, reset values
                msgPosition[fd] = 0;
                memset(fullMessageBuffer[fd], '\0', SOCKET_BUFFER_SIZE);
@@ -608,6 +619,39 @@ implementation{
 
    event void Transport.addSocket(socket_t fd) {
       call socketList.pushback(fd);
+   }
+
+   void messageHandler(socket_t fd){
+      char *iterator = NULL, *token = NULL;
+      char tempMessage[SOCKET_BUFFER_SIZE];
+      uint32_t keys, i;
+      memcpy(tempMessage, fullMessageBuffer[fd], SOCKET_BUFFER_SIZE);
+      //depending on message, execute the following actions
+      dbg(P4_DBG_CHANNEL, "Analyzing message: %s\n", tempMessage);
+      //"hello", map socket number to username.
+      token = strtok(tempMessage, " ");//tokenizing by spaces
+      if(strcmp(token, "hello")  == 0){
+         token = strtok(NULL, " ");//get next token (username)
+         dbg(P4_DBG_CHANNEL, "Found \"hello\"!\nMapping socket[%hhu] to value[%s]\n", fd, token);
+         memcpy(connectedUsers[fd], token, strlen(token)+1);
+      }
+      //"msg", broadcast message to all users connected
+      //"whisper", send message to specified username
+      //"listusr", output all connected users
+      if(strcmp(token, "listusr") == 0){
+         
+      }
+      //to debug
+      //keys = call userMap.getKeys();
+      dbg(P4_DBG_CHANNEL, "\n\n**CURRENT CONNECTED USERS:**\n");
+      for(i = 0; i < MAX_NUM_OF_SOCKETS; i++){
+         if(connectedUsers[i][0] != NULL){
+            dbg(P4_DBG_CHANNEL,"socket[%hhu]->[%s]\n", i, connectedUsers[i]);
+         }
+      }
+       dbg(P4_DBG_CHANNEL, "\n**END OF CONNECTED USERS**\n\n");
+
+
    }
 
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t protocol, uint16_t seq, uint8_t* payload, uint8_t length){

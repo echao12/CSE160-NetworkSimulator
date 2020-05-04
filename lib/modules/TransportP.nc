@@ -328,8 +328,8 @@ implementation{
 
                     // Adjust usedSocket value
                     call usedSockets.set(socket->fd, 1);
-                    dbg(P4_DBG_CHANNEL, "\nSOCKET[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
-                    socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
+                    dbg(P4_DBG_CHANNEL, "\nSOCKET(%hhu):[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
+                    socket->fd, socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
                     
                     error = SUCCESS;
                 }
@@ -352,8 +352,8 @@ implementation{
                 
                 // Adjust usedSocket Map value
                 call usedSockets.set(socket->fd, 1); //1 is established, 0 is not
-                dbg(P4_DBG_CHANNEL, "\nSOCKET[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
-                    socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
+                dbg(P4_DBG_CHANNEL, "\nSOCKET(%hhu):[%hhu][%hhu]->[%hhu][%hhu] STATE IS NOW ESTABLISHED\n",
+                    socket->fd, socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
                 
                 // Send an ACK packet to the client, it doesn't matter if this ACK packet reaches the client or not
                 makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, 1, socket->nextExpected, 0, advertisedWindow, "ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
