@@ -53,6 +53,7 @@ module Node{
 
 implementation{
    pack sendPackage;
+   tcp_pack TCPPackage;
    uint16_t currentSequence = 0;
 
    // TCP-related variables
@@ -64,10 +65,12 @@ implementation{
 
    // Prototypes
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
+   void makeTCPPack(tcp_pack *Package, uint8_t srcPort, uint8_t destPort, uint8_t byteSeq, uint16_t acknowledgement, uint8_t flags, uint8_t advertisedWindow, uint8_t *payload, uint8_t length);
    bool checkCache(pack *Package);
    void incrementSequence();
    void updateNeighbors(uint16_t src);
    void messageHandler(socket_t fd);
+   void beginWrite();
 
    //TinyOS Boot sequence completed, each mote calls this function.
    event void Boot.booted(){
@@ -229,6 +232,9 @@ implementation{
       if(len==sizeof(pack)){
          pack* myMsg=(pack*) payload;
          dbg(FLOODING_CHANNEL, "Packet Origin: %hhu\n", myMsg->src);
+         if(myMsg->src == TOS_NODE_ID && myMsg->dest == 1){
+            dbg(P4_DBG_CHANNEL, "RECEIVED PACKET TO SELF TO BEGIN TRANSMISSION\n");
+         }
          // dbg(GENERAL_CHANNEL, "Package Payload: %s\n", myMsg->payload);
          if(myMsg->seq < currentSequence - 100){
             //dbg(P4_DBG_CHANNEL, "Packet out of date...\n");
@@ -505,6 +511,7 @@ implementation{
    //include sending client's name
    event void CommandHandler.whisper(char *user, char *msg){
       char *token;
+      error_t error;
       if(default_socket != NULL){
          //dbg(P4_DBG_CHANNEL, "Arguments: user:%s , msg:%s\n", user, msg);
          //dbg(APPLICATION_CHANNEL, "Sending Whisper to %s...\n", user);
@@ -517,7 +524,20 @@ implementation{
          numbersToTransfer = strlen(messageBuff);
          numbersWrittenSoFar = 0;
          dbg(P4_DBG_CHANNEL, "WHISPER(%hhu): %s\n",numbersToTransfer, messageBuff);
+         beginWrite();
          call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);//resert timer to write.
+         // make an empty packet to signal Transport layer to begin sending
+         // packet will determine where to send the message.
+         // send packet to itself, src addr/port: 0/0, dest addr/port: 1/41
+         makeTCPPack(&TCPPackage, 0, 41, 0, 0, 0, 1, "Signal Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
+         //no flags
+         TCPPackage.flags = 0;
+         makePack(&sendPackage, TOS_NODE_ID, 1, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+         memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+         dbg(P4_DBG_CHANNEL, "Sending package to self to signal sendBuffer transmission...\n");
+         if(call Transport.receive(&sendPackage) == SUCCESS){
+            dbg(P4_DBG_CHANNEL, "Transmission initiated!\n");
+         }
       }else{
          dbg(APPLICATION_CHANNEL, "NO CONNECTION ESTABLISHED...\n");
       }
@@ -587,6 +607,33 @@ implementation{
       numbersWrittenSoFar += i;
       
    }
+   //same as TCPWriteTimer.fired() but for immediate write
+   void beginWrite(){
+      uint16_t i, num, numbersToWrite;//numbers will be letters
+      //dbg(APPLICATION_CHANNEL, "TCPWriteTimer Fired!...\n");
+      numbersToWrite = numbersToTransfer - numbersWrittenSoFar;
+      if (numbersToWrite == 0) {
+         // All numbers have been written
+         return;
+      }
+      //else if (numbersToWrite > SOCKET_BUFFER_SIZE/2) {
+      else if (numbersToWrite > SOCKET_BUFFER_SIZE) {
+         // Limit the amount of numbers written to the maximum space available
+         numbersToWrite = SOCKET_BUFFER_SIZE;
+      }
+
+      
+      // Fill the array with numbers
+      //for (i = 0; i < numbersToWrite; i++) {
+      //   num = numbersWrittenSoFar + i + 1;
+      //   memcpy(&buff[i*2], &num, 2);
+      //}
+      
+      // Ask the Transport module to write as much as it can
+      //i = call Transport.write(default_socket, buff, numbersToWrite*2);
+      i = call Transport.write(default_socket, messageBuff, numbersToWrite);
+      numbersWrittenSoFar += i;
+   }
 
    event void TCPReadTimer.fired() {
       //uint8_t buff[SOCKET_BUFFER_SIZE];
@@ -598,32 +645,39 @@ implementation{
       numSockets = call socketList.size();
       for (i = 0; i < numSockets; i++) {
          fd = call socketList.get(i);
-
+         //dbg(P4_DBG_CHANNEL, "msgPos[fd:%hhu]: %hhu\t BEFORE read()\n", fd, msgPosition[fd]);
          // Read the socket's buffer
          //numbersRead = call Transport.read(fd, buff, SOCKET_BUFFER_SIZE) / 2;
          numbersRead = call Transport.read(fd, buff, SOCKET_BUFFER_SIZE);
+         //dbg(P4_DBG_CHANNEL, "msgPos[fd:%hhu]: %hhu\t AFTER read()\n", fd, msgPosition[fd]);
          if(numbersWrittenSoFar != 0){
             dbg(P4_DBG_CHANNEL, "letters written so far: %hhu\n", numbersWrittenSoFar);
          }
          // Print out the numbers
+
+         //could try numbersRead-1 and j++ at the end of if statement in case break; needs to be removed
          k = msgPosition[fd];
          for (j = 0; j < numbersRead; j++) {
             memcpy(&letter, &buff[j], 1);
-            dbg(GENERAL_CHANNEL, "Received letter: %c\twriting to buffer[%hhu + %hhu]\n", letter, k, j);
+            dbg(GENERAL_CHANNEL, "Socket(%hhu)-Received letter: %c\twriting to buffer[%hhu + %hhu]\n", fd, letter, k, j);
             fullMessageBuffer[fd][k+j] = buff[j];
             msgPosition[fd]++;
             if(buff[j] == '\r' && buff[j+1] == '\n'){
                fullMessageBuffer[fd][k+j+1] = buff[j+1];
-               j++;
                dbg(P4_DBG_CHANNEL, "\nEND OF MSG DETECTED!\n[\\r]&&[\\n]\nMsg Stored: %s\n\n", fullMessageBuffer[fd]);
                //handle full message
                messageHandler(fd);
                //end of message, reset values
+               //dbg(P4_DBG_CHANNEL, "\n\nmsgPosition[%hhu]:%hhu is reset to 0\n\n", fd, msgPosition[fd]);
                msgPosition[fd] = 0;
+               k = 0;
                memset(fullMessageBuffer[fd], '\0', SOCKET_BUFFER_SIZE);
+               //this assumes 1 message at a time to read per socket
+               break;//QUICK FIX SINCE msgPOS keeps incrementing at the end of msg
             }
          }
       }
+
    }
 
    event void CommandHandler.setAppServer(){}
@@ -689,6 +743,15 @@ implementation{
       Package->protocol = protocol;
       memcpy(Package->payload, payload, length);
       incrementSequence();//dont forget to increment sequence.
+   }
+   void makeTCPPack(tcp_pack *Package, uint8_t srcPort, uint8_t destPort, uint8_t byteSeq, uint16_t acknowledgement, uint8_t flags, uint8_t advertisedWindow, uint8_t *payload, uint8_t length) {
+      Package->srcPort = srcPort;
+      Package->destPort = destPort;
+      Package->byteSeq = byteSeq;
+      Package->acknowledgement = acknowledgement;
+      Package->flags = flags;
+      Package->advertisedWindow = advertisedWindow;
+      memcpy(Package->payload, payload, length);
    }
 
    bool checkCache(pack *Package) {

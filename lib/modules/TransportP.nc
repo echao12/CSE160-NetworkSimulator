@@ -228,18 +228,27 @@ implementation{
         dbg(TRANSPORT_CHANNEL, "Transport Module: \nNODE(%hhu) RECIEVED TCP Packet seq#(%hhu)\n", TOS_NODE_ID, package->seq);
         extractTCPPack(package, &TCPPackage);
         logTCPPack(&TCPPackage);
-        
+        if(package->src == 0 && package->dest == 1 && TCPPackage.srcPort == 0 && TCPPackage.destPort == 41){
+            dbg(P4_DBG_CHANNEL, "GOT PACKET TO BEGIN TRANSMISSION\n");
+        }
 
         // Check if this packet is intended for one of the sockets
         numSockets = call socketList.size();
         for (i = 0; i < numSockets; i++) {
             socket = call socketList.getPtr(i);
+            //dbg(P4_DBG_CHANNEL, "socket:[%hhu][%hhu]->[%hhu][%hhu]\n", socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
+            //dbg(P4_DBG_CHANNEL, "package: src[%hhu][%hhu] -> dest[%hhu][%hhu]\n", package->src, TCPPackage.srcPort, package->dest, TCPPackage.destPort);
             if (socket->src.addr == package->dest && socket->src.port == TCPPackage.destPort) {
                 dbg(TRANSPORT_CHANNEL, "FOUND SOCKET\n");
+                //dbg(P4_DBG_CHANNEL, "FOUND SOCKET\n");
+                break;
+            }else if(socket->dest.addr == package->dest){
+                dbg(P4_DBG_CHANNEL, "FOUND SOCKET TO CONNECT TO HARD CODED SERVER[1][41]\n");
                 break;
             }
             else {
                 socket = NULL;
+                //dbg(P4_DBG_CHANNEL, "NULL SOCKET\n");
             }
         }
 
@@ -439,7 +448,26 @@ implementation{
 
 
             }else if(TCPPackage.flags == 0){
-                //not sure yet
+                //will use no flag bits to recieve orders from the node to begin sending packets
+                // Send some amount of packets depending on how much data is in the send buffer and also the advertisedWindow
+                dbg(P4_DBG_CHANNEL,"RECEIVED EMPTY PACKET FROM [%hhu][%hhu] -> [%hhu][%hhu]\n", package->src, TCPPackage.srcPort, package->dest, TCPPackage.destPort);
+                dbg(P4_DBG_CHANNEL, "payload: %s\n", TCPPackage.payload);
+                dbg(P4_DBG_CHANNEL, "Transmitting(%hhu packets) in sendBuffer over Socket[%hhu]: [%hhu][%hhu]->[%hhu][%hhu]\n",TCPPackage.advertisedWindow, socket->fd, socket->src.addr, socket->src.port, socket->dest.addr, socket->dest.port);
+                advertisedWindow = SOCKET_BUFFER_SIZE - (socket->nextExpected - 1 - socket->lastRead);
+                numPacketsSent = sendFromBuffer(socket, advertisedWindow); 
+                if (numPacketsSent == 0 && i > 0) {
+                    dbg(P4_DBG_CHANNEL, "Packets from buffer sent...\n");
+                    // Send at least an ACK packet
+                    advertisedWindow = SOCKET_BUFFER_SIZE - (socket->nextExpected - 1 - socket->lastRead);
+                    makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, 0, socket->nextExpected, 0, advertisedWindow, "null", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                    setFlagBit(&TCPPackage, ACK_FLAG_BIT);
+                    resetBuffer(TCPPackage.payload, TCP_PACKET_MAX_PAYLOAD_SIZE);
+                    makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+                    memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+
+                    signal Transport.send(&sendPackage);
+                }
+                error = SUCCESS;
             }
         }else if(socket->state == FIN_WAIT_1){
             dbg(TRANSPORT_CHANNEL, "CURRENT SOCKET STATE: FIN_WAIT_1\n");
@@ -566,9 +594,11 @@ implementation{
         // Empty send buffer by sending as many packets as possible (keep in mind the advertisedWindow size)
         uint16_t i, j, num, bytePos, packetsSent = 0;
         bool isEmpty;
-
+        //dbg(P4_DBG_CHANNEL, "SendFromBuffer Initiated with effective Window(%hhu)...\n", socket->effectiveWindow);
+        //dbg(P4_DBG_CHANNEL, "Socket last sent:%hhu LastAck: %hhu\n", socket->lastSent, socket->lastAck);
         // Calculate effective window size
         if (socket->lastSent >= socket->lastAck) {
+            //dbg(P4_DBG_CHANNEL, "advertiseWindow:%hhu > %hhu?\n", advertisedWindow, socket->lastSent - socket->lastAck);
             if (advertisedWindow > socket->lastSent - socket->lastAck) {
                 socket->effectiveWindow = advertisedWindow - (socket->lastSent - socket->lastAck);
             }
@@ -577,6 +607,7 @@ implementation{
             }
         }
         else {
+            //dbg(P4_DBG_CHANNEL, "advertiseWindow:%hhu > %hhu?\n", advertisedWindow, SOCKET_BUFFER_SIZE + socket->lastSent - socket->lastAck);
             if (advertisedWindow > SOCKET_BUFFER_SIZE + socket->lastSent - socket->lastAck) {
                 socket->effectiveWindow = advertisedWindow - (SOCKET_BUFFER_SIZE + socket->lastSent - socket->lastAck);
             }
@@ -586,8 +617,10 @@ implementation{
         }
         dbg(TRANSPORT_CHANNEL, "AdvertisedWindow %hhu  Effective Window %hhu\n", advertisedWindow, socket->effectiveWindow);
 
+
         // Calculate this socket's advertisedWindow
         advertisedWindow = SOCKET_BUFFER_SIZE - (socket->nextExpected - 1 - socket->lastRead);
+        //dbg(P4_DBG_CHANNEL, "AdvertisedWindow %hhu  Effective Window %hhu\n", advertisedWindow, socket->effectiveWindow);
 
         bytePos = increaseByteSeq(socket->lastSent, 1);
         for (i = 0; i < socket->effectiveWindow; i += TCP_PACKET_MAX_PAYLOAD_SIZE) {
@@ -610,7 +643,7 @@ implementation{
                     break;
                 }
                 else {
-                    dbg(TRANSPORT_CHANNEL, "sendBuff[%hhu] = %hhu\n", decreaseByteSeq(bytePos, 2), num);
+                    //dbg(P4_DBG_CHANNEL, "sendBuff[%hhu] = %hhu\n", decreaseByteSeq(bytePos, 2), num);
                     memcpy(&TCPPackage.payload[j], &num, 2);
                     socket->lastSent = decreaseByteSeq(bytePos, 1);
                     isEmpty = FALSE;
