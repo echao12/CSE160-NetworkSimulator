@@ -96,6 +96,7 @@ implementation{
             socketConfig.dest.port = 0;
             socketConfig.state = CLOSED;
             socketConfig.bufferState = TYPICAL;
+            socketConfig.bufferSpace = SOCKET_BUFFER_SIZE;
             resetBuffer(socketConfig.sendBuff, SOCKET_BUFFER_SIZE);
             resetBuffer(socketConfig.rcvdBuff, SOCKET_BUFFER_SIZE);
             socketConfig.lastWritten = socketConfig.lastAck = socketConfig.lastSent = 0;
@@ -179,16 +180,23 @@ implementation{
             return 0;
         }
 
+        dbg(TRANSPORT_CHANNEL, "write %hhu %hhu %hhu %hhu\n", socket->lastAck, socket->lastSent, socket->lastWritten, socket->bufferSpace);
+
         // Write buffer byte by byte
         bytesWritten = 0;
-        bytePos = socket->lastWritten;
+        bytePos = increaseByteSeq(socket->lastWritten, 1);
         for (i = 0; i < bufflen; i++) {
-            bytePos = increaseByteSeq(bytePos, 1);
-            if (socket->sendBuff[bytePos] == 0) {
+            if (socket->bufferSpace <= 4) {
+                // Make sure to leave some space in the buffer
+                // This is to prevent confusion when the buffer is full
+                break;
+            }
+            else {
                 // This position of the send buffer is empty, fill it
                 dbg(P4_DBG_CHANNEL, "Writting [%hhu]->[%c] to buffer[%hhu]\n", buff[i],buff[i], i);
                 socket->sendBuff[bytePos] = buff[i];
-                bytesWritten++;
+                socket->bufferSpace--;
+                bytesWritten += 1;
                 socket->lastWritten = bytePos;
                 if (socket->lastAck < socket->lastWritten) {
                     socket->bufferState = TYPICAL;
@@ -197,13 +205,12 @@ implementation{
                     socket->bufferState = WRAP;
                 }
                 else {
+                    // This should never get called
+                    dbg(TRANSPORT_CHANNEL, "write: sendBuff is full\n");
                     socket->bufferState = FULL;
                     break;
                 }
-            }
-            else {
-                // Send buffer is already full
-                break;
+                bytePos = increaseByteSeq(bytePos, 1);
             }
         }
 
@@ -264,6 +271,16 @@ implementation{
             //check for a SYN msg
             if (checkFlagBit(&TCPPackage, SYN_FLAG_BIT)) {
                 dbg(TRANSPORT_CHANNEL, "RECEIVED SYN PACKET(sender seq#: %hhu)\nREPLYING with SYN/ACK TCP Packet\n", package->seq);
+
+                // Check if the sender is already connected to one of the sockets
+                numSockets = call socketList.size();
+                for (i = 0; i < numSockets; i++) {
+                    socket = call socketList.getPtr(i);
+                    if (socket->dest.addr == package->src && socket->dest.port == TCPPackage.srcPort) {
+                        // A socket for the sender has been created already
+                        return FAIL;
+                    }
+                }
                 
                 // Try to create a new socket for the connection
                 socketFD = call Transport.accept(socket->fd);
@@ -324,6 +341,7 @@ implementation{
                 // Reply with an ACK packet
                 makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, nextByteSeq, 1, 0, advertisedWindow, "ACK", TCP_PACKET_MAX_PAYLOAD_SIZE);
                 setFlagBit(&TCPPackage, ACK_FLAG_BIT);
+                resetBuffer(TCPPackage.payload, TCP_PACKET_MAX_PAYLOAD_SIZE);
                 makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
                 memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
 
@@ -333,6 +351,7 @@ implementation{
                     
                     socket->lastWritten = nextByteSeq;
                     socket->lastSent = nextByteSeq;
+                    socket->bufferSpace--;
                     socket->state = ESTABLISHED;
 
                     // Adjust usedSocket value
@@ -402,6 +421,8 @@ implementation{
                     resetBuffer(TCPPackage.payload, TCP_PACKET_MAX_PAYLOAD_SIZE);
                     makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
                     memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+
+                    // TODO: Decide whether this ACK packet should be put in the outstanding list
 
                     signal Transport.send(&sendPackage);
                 }
@@ -546,9 +567,8 @@ implementation{
         uint16_t i, num, bytePos;
 
         // Process the payload byte by byte
-        for (i = 0; i < TCP_PACKET_MAX_PAYLOAD_SIZE; i+=2) {
-            memcpy(&num, &packet->payload[i], 2);
-            if (num == 0) {
+        for (i = 0; i < TCP_PACKET_MAX_PAYLOAD_SIZE; i++) {
+            if (packet->payload[i] == 0) {
                 // End of payload
                 break;
             }
@@ -556,35 +576,31 @@ implementation{
             // Determine the position of this byte in the receive buffer
             bytePos = increaseByteSeq(packet->byteSeq, i);
 
-            if (socket->rcvdBuff[bytePos] == 0) {
-                // Only fill this part of the buffer if it is empty
-                memcpy(&socket->rcvdBuff[bytePos], &num, 2);
-                dbg(TRANSPORT_CHANNEL, "rcvdBuff[%hhu] = %hhu\n", bytePos, socket->rcvdBuff[bytePos]);
+            socket->rcvdBuff[bytePos] = packet->payload[i];
+            socket->bufferSpace--;
+            dbg(TRANSPORT_CHANNEL, "rcvdBuff[%hhu] = %hhu\n", bytePos, socket->rcvdBuff[bytePos]);
 
-                // Update sliding window parameters (receiver side)
-                if (socket->bufferState == TYPICAL) {
-                    if (bytePos > socket->lastRcvd || bytePos < socket->lastRead) {
-                        socket->lastRcvd = bytePos;
-                        if (socket->lastRcvd < socket->lastRead) {
-                            socket->bufferState = WRAP;
-                        }
+            // Update sliding window parameters (receiver side)
+            if (socket->bufferState == TYPICAL) {
+                if (bytePos > socket->lastRcvd || bytePos < socket->lastRead) {
+                    socket->lastRcvd = bytePos;
+                    if (socket->lastRcvd < socket->lastRead) {
+                        socket->bufferState = WRAP;
                     }
                 }
-                else {
-                    if (socket->lastRcvd < bytePos && bytePos <= socket->lastRead) {
-                        socket->lastRcvd = bytePos;
-                        if (socket->lastRcvd == socket->lastRead) {
-                            socket->bufferState = FULL;
-                        }
+            }
+            else {
+                if (socket->lastRcvd < bytePos && bytePos <= socket->lastRead) {
+                    socket->lastRcvd = bytePos;
+                    if (socket->lastRcvd == socket->lastRead) {
+                        socket->bufferState = FULL;
                     }
                 }
+            }
 
-                if (socket->bufferState != FULL) {
-                    memcpy(&num, &socket->rcvdBuff[socket->nextExpected], 2);
-                    while (num != 0) {
-                        socket->nextExpected = increaseByteSeq(socket->nextExpected, 2);
-                        memcpy(&num, &socket->rcvdBuff[socket->nextExpected], 2);
-                    }
+            if (socket->bufferState != FULL) {
+                while (socket->rcvdBuff[socket->nextExpected] != 0) {
+                    socket->nextExpected = increaseByteSeq(socket->nextExpected, 1);
                 }
             }
         }
@@ -625,39 +641,36 @@ implementation{
         bytePos = increaseByteSeq(socket->lastSent, 1);
         for (i = 0; i < socket->effectiveWindow; i += TCP_PACKET_MAX_PAYLOAD_SIZE) {
             // Create a packet
-            makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, bytePos, socket->nextExpected, 0, advertisedWindow, "TBD", TCP_PACKET_MAX_PAYLOAD_SIZE);
+            makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, bytePos, socket->nextExpected, 0, advertisedWindow, "", TCP_PACKET_MAX_PAYLOAD_SIZE);
             setFlagBit(&TCPPackage, ACK_FLAG_BIT);
 
             // Fill the payload with data from send buffer
             isEmpty = TRUE;
-            for (j = 0; j < TCP_PACKET_MAX_PAYLOAD_SIZE; j += 2) {
-                memcpy(&num, &socket->sendBuff[bytePos], 2);
-                bytePos = increaseByteSeq(bytePos, 2);
-                if (i + j + 2 > socket->effectiveWindow) {
+            for (j = 0; j < TCP_PACKET_MAX_PAYLOAD_SIZE; j++) {
+                if(socket->sendBuff[bytePos] == 0) {
+                    // No more data to send
                     break;
                 }
-                else if (num == 0) {
+                else if (i + j + 1 > socket->effectiveWindow) {
+                    // Receiver isn't accepting any more packets
                     break;
                 }
-                else if (socket->bufferState == FULL && bytePos == increaseByteSeq(socket->lastAck, 1)) {
-                    break;
-                }
-                else {
-                    //dbg(P4_DBG_CHANNEL, "sendBuff[%hhu] = %hhu\n", decreaseByteSeq(bytePos, 2), num);
-                    memcpy(&TCPPackage.payload[j], &num, 2);
-                    socket->lastSent = decreaseByteSeq(bytePos, 1);
-                    isEmpty = FALSE;
-                }
+
+                dbg(TRANSPORT_CHANNEL, "Packaging %hhu\n", socket->sendBuff[bytePos]);
+                TCPPackage.payload[j] = socket->sendBuff[bytePos];
+                socket->lastSent = bytePos;
+                isEmpty = FALSE;
+                bytePos = increaseByteSeq(bytePos, 1);
             }
+
+            // Fill any remaining space on the payload with zeros
             for (; j < TCP_PACKET_MAX_PAYLOAD_SIZE; j++) {
                 TCPPackage.payload[j] = 0;
             }
 
             if (isEmpty) {
+                // Can't send any more packets
                 break;
-            }
-            else {
-                dbg(TRANSPORT_CHANNEL, "Sending packet\n");
             }
 
             makePack(&sendPackage, socket->src.addr, socket->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
@@ -688,7 +701,7 @@ implementation{
     */
     command uint16_t Transport.read(socket_t fd, uint8_t *buff, uint16_t bufflen){
         socket_store_t* socket;
-        uint16_t i, num, bytePos, bytesRead;
+        uint16_t i, bytePos, bytesRead;
         
         // Get the specified socket
         socket = getSocketPtr(fd);
@@ -707,28 +720,26 @@ implementation{
         // Read buffer byte by byte
         bytesRead = 0;
         bytePos = increaseByteSeq(socket->lastRead, 1);
-        for (i = 0; i < bufflen; i+=2) {
-            memcpy(&num, &socket->rcvdBuff[bytePos], 2);
-            if (num != 0) {
+        for (i = 0; i < bufflen; i++) {
+            if (socket->rcvdBuff[bytePos] != 0) {
                 // There is something to read
-                memcpy(&buff[i], &num, 2);  // copy the data
-                socket->rcvdBuff[bytePos] = 0;
-                socket->rcvdBuff[bytePos+1] = 0;    
-                socket->lastRead = bytePos+1;
+                buff[i] = socket->rcvdBuff[bytePos];
+                bytesRead++;
+                socket->rcvdBuff[bytePos] = 0;    
+                socket->lastRead = bytePos;
                 if (socket->lastRead < socket->lastRcvd) {
                     socket->bufferState = TYPICAL;
                 }
                 else {
                     socket->bufferState = WRAP;
                 }
-                bytesRead += 2;
+                bytePos = increaseByteSeq(bytePos, 1);
             }
             else {
                 // No more data to read
                 socket->nextExpected = bytePos;
                 break;
             }
-            bytePos = increaseByteSeq(bytePos, 2);
         }
 
         return bytesRead;
@@ -768,9 +779,10 @@ implementation{
         // Initialize sliding window parameters
         socket->bufferState = TYPICAL;
         initialByteSeq = 0;  // Set as 0 for now, but randomize it later after everything's working (note: always pick an even number)
-        socket->lastAck = initialByteSeq;
+        socket->lastAck = decreaseByteSeq(initialByteSeq, 1);
         socket->lastSent = initialByteSeq;
         socket->lastWritten = initialByteSeq;
+        socket->bufferSpace--;
 
         // Send a SYN packet
         makeTCPPack(&TCPPackage, socket->src.port, socket->dest.port, initialByteSeq, 0, 0, 0, "SYN", TCP_PACKET_MAX_PAYLOAD_SIZE);
@@ -907,13 +919,26 @@ implementation{
         // When this timer fires, resend the earliest outstanding packet
         pack packet;
         uint32_t t0, t1, t2;
-        uint16_t attempt;
+        uint16_t attempt, i;
+        socket_store_t* socket;
 
         t0 = call resendTimer.getNow();
 
+        dbg(TRANSPORT_CHANNEL, "resendTimer %u %hu\n", t0, call outstandingPackets.size());
+
         if (call outstandingPackets.isEmpty()) {
-            // Nothing to retransmit, just reset the timer
+            // Nothing to retransmit, reset the timer
             call resendTimer.startOneShotAt(t0, RTT_ESTIMATE);
+            // Also send packets if there's something in the buffer
+            for (i = 1; i < MAX_NUM_OF_SOCKETS; i++) {
+                socket = getSocketPtr(i);
+                if (socket == NULL) {
+                    break;
+                }
+                if (socket->bufferSpace < SOCKET_BUFFER_SIZE) {
+                    sendFromBuffer(socket, 8);
+                }
+            }
             return;
         }
 
@@ -922,7 +947,7 @@ implementation{
         if (t0 < t1) {
             // There is something to retransmit but now is not the time
             // Reset the timer accordingly
-            call resendTimer.startOneShotAt(t0, t1 - t0);
+            call resendTimer.startOneShotAt(t0, t1 - t0 + 1);
             return;
         }
 
@@ -937,7 +962,7 @@ implementation{
         if (attempt < MAX_RESEND_ATTEMPTS) {
             // Push it to the back of the list
             call outstandingPackets.pushback(packet);
-            call timeToResend.pushback(t1 + RTT_ESTIMATE);
+            call timeToResend.pushback(t0 + RTT_ESTIMATE);
             call resendAttempts.pushback(attempt);
         }
         else {
@@ -951,7 +976,7 @@ implementation{
         else {
             t2 = call timeToResend.front();
         }
-        call resendTimer.startOneShotAt(t1, t2 - t1);
+        call resendTimer.startOneShotAt(t0, t2 - t0);
     }
 
     void makeOutstanding(pack Package, uint16_t timeoutValue) {
@@ -967,42 +992,69 @@ implementation{
         uint32_t t;
         uint16_t i, attempt, bytePos, numOutstanding = call outstandingPackets.size();
         extractTCPPack(ackPack, &ackTCP);
-        if (checkFlagBit(&ackTCP, ACK_FLAG_BIT)) {
-            for (i = 0; i < numOutstanding; i++) {
-                sentPack = call outstandingPackets.popfront();
-                t = call timeToResend.popfront();
-                attempt = call resendAttempts.popfront();
 
-                if (sentPack.src == ackPack->dest && sentPack.dest == ackPack->src) {
-                    extractTCPPack(&sentPack, &sentTCP);
-                    if (sentTCP.srcPort == ackTCP.destPort && sentTCP.destPort && ackTCP.srcPort) {
-                        bytePos = increaseByteSeq(socket->lastAck, 1);
-                        if (socket->sendBuff[bytePos] == 0) {
-                            // This position of the buffer is already freed.
-                            // This might happen if the ACK packet arrives too late.
+        // Check if the packet is an ACK packet
+        if (checkFlagBit(&ackTCP, ACK_FLAG_BIT) == FALSE) {
+            return;
+        }
+
+        dbg(TRANSPORT_CHANNEL, "acknowledgePacket %hhu %hhu %hhu %hhu\n", socket->lastAck, socket->lastSent, socket->lastWritten, ackTCP.acknowledgement);
+
+        // Check if the acknowledgement number is outdated
+        if (socket->bufferState == TYPICAL) {
+            if (ackTCP.acknowledgement <= socket->lastAck || (socket->lastWritten + 1) < ackTCP.acknowledgement) {
+                dbg(TRANSPORT_CHANNEL, "acknowledgePacket: Packet is outdated\n");
+                return;
+            }
+        }
+        else if (socket->bufferState == WRAP) {
+            if (socket->lastWritten < ackTCP.acknowledgement && ackTCP.acknowledgement <= socket->lastAck) {
+                dbg(TRANSPORT_CHANNEL, "acknowledgePacket: Packet is outdated\n");
+                return;
+            }
+        }
+
+        // Update lastAck and free sendBuff
+        bytePos = increaseByteSeq(socket->lastAck, 1);
+        while (bytePos != ackTCP.acknowledgement) {
+            socket->sendBuff[bytePos] = 0;
+            socket->bufferSpace++;
+            socket->lastAck = bytePos;
+            if (socket->lastAck <= socket->lastWritten) {
+                socket->bufferState = TYPICAL;
+            }
+            else if (socket->lastWritten < socket->lastAck) {
+                socket->bufferState = WRAP;
+            }
+            bytePos = increaseByteSeq(bytePos, 1);
+        }
+
+        // Remove the corresponding packets
+        for (i = 0; i < numOutstanding; i++) {
+            sentPack = call outstandingPackets.popfront();
+            t = call timeToResend.popfront();
+            attempt = call resendAttempts.popfront();
+
+            if (sentPack.src == ackPack->dest && sentPack.dest == ackPack->src) {
+                extractTCPPack(&sentPack, &sentTCP);
+                if (sentTCP.srcPort == ackTCP.destPort && sentTCP.destPort == ackTCP.srcPort) {
+                    if (socket->bufferState == TYPICAL) {
+                        if (sentTCP.byteSeq <= socket->lastAck || socket->lastWritten < sentTCP.byteSeq) {
                             continue;
                         }
-                        while (bytePos != ackTCP.acknowledgement) {
-                            // Free the buffer at this position
-                            socket->sendBuff[bytePos] = 0;
-                            socket->lastAck = bytePos;
-                            if (socket->lastAck < socket->lastWritten) {
-                                socket->bufferState = TYPICAL;
-                            }
-                            else if (socket->lastWritten < socket->lastAck) {
-                                socket->bufferState = WRAP;
-                            }
-                            bytePos = increaseByteSeq(bytePos, 1);
+                    }
+                    else if (socket->bufferState == WRAP) {
+                        if (socket->lastWritten < sentTCP.byteSeq && sentTCP.byteSeq <= socket->lastAck) {
+                            continue;
                         }
-                        break;
                     }
                 }
-
-                // The packet doesn't match, return it to the list
-                call outstandingPackets.pushback(sentPack);
-                call timeToResend.pushback(t);
-                call resendAttempts.pushback(attempt);
             }
+
+            // This packet hasn't been acknowledged, return it to the list
+            call outstandingPackets.pushback(sentPack);
+            call timeToResend.pushback(t);
+            call resendAttempts.pushback(attempt);
         }
     }
 
