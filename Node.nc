@@ -786,7 +786,7 @@ implementation{
          }
          if(userFound == FALSE){
             //temp is a msg
-            dbg(P4_DBG_CHANNEL, "Found \"msg\" from %s\nmessage:%s\n", connectedUsers[fd], temp);
+            dbg(P4_DBG_CHANNEL, "Found \"msg\" to %s\nmessage:%s\n",username, temp);
             //modify the message
             memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
             sprintf(messageBuff, "msg %s:%s\n", connectedUsers[fd], temp);
@@ -802,6 +802,8 @@ implementation{
                      target_fd = i;
                      default_socket = target_fd;
                      socketData = call Transport.getSocketByFd(target_fd);
+                     bytesToTransfer = strlen(messageBuff); 
+                     bytesWrittenSoFar = 0;
                      writeToSocket(target_fd);
                      call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);//resert timer to write.
                      makeTCPPack(&TCPPackage, 0, socketData->dest.port, 0, 0, 0, 5, "Sig. Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
