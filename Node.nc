@@ -125,6 +125,9 @@ implementation{
       if (call packetsQueue.size() == 0) {
          return;
       }
+      else if (call packetsQueue.size() > 100) {
+         dbg(GENERAL_CHANNEL, "Lots of packets here\n");
+      }
 
       // Otherwise, send the first packet in the queue
       sendPackage = call packetsQueue.popfront();
@@ -482,16 +485,16 @@ implementation{
       //port and server node is predetermined to be ID[1] P[41]
       socket_t socket;
       socket_addr_t sourceAddress, destinationAddress;
-      dbg(APPLICATION_CHANNEL,"CLIENT[%hhu][%hhu] sending hello to [%hhu][%hhu]...\n", TOS_NODE_ID, clientPort, 1, 41);
+      dbg(P4_DBG_CHANNEL,"CLIENT[%hhu][%hhu] sending hello to [%hhu][%hhu]...\n", TOS_NODE_ID, clientPort, 1, 41);
       //assign username to this node
       memset(username, '\0', SOCKET_BUFFER_SIZE);
       memcpy(username, user, strlen(user)-1);//i dont know where the carriage return is coming from, removing it
-      dbg(APPLICATION_CHANNEL, "username set: %s\n", username);
+      dbg(P4_DBG_CHANNEL, "username set: %s\n", username);
       //generate msg
       memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
       sprintf(messageBuff, "hello %s %hhu\r\n", username, clientPort);
       bytesToTransfer = strlen(messageBuff);
-      dbg(APPLICATION_CHANNEL, "HELLO MESSAGE[%hhu]: %s\n", bytesToTransfer, messageBuff);
+      dbg(P4_DBG_CHANNEL, "HELLO MESSAGE[%hhu]: %s\n", bytesToTransfer, messageBuff);
       
       //generate a socket
       sourceAddress.addr = TOS_NODE_ID;
@@ -501,7 +504,7 @@ implementation{
 
       socket = call Transport.socket();
       if(call Transport.bind(socket, &sourceAddress) == SUCCESS) {
-         dbg(APPLICATION_CHANNEL, "Attempting to connect from hello...\n");
+         dbg(P4_DBG_CHANNEL, "Attempting to connect from hello...\n");
          call Transport.connect(socket, &destinationAddress);
          default_socket = socket;
          call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);
@@ -511,8 +514,9 @@ implementation{
    
    //send message to server, which will broadcast the msg to all connected users.
    event void CommandHandler.message(char *msg){
+      //dbg(APPLICATION_CHANNEL, "Sending a broadcast message to the server...\n");
       if(default_socket != NULL_SOCKET){
-         dbg(APPLICATION_CHANNEL, "Sending message...\n");
+         dbg(P4_DBG_CHANNEL, "Sending message...\n");
          //generate the message
          memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
          sprintf(messageBuff, "msg %s\r\n", msg);
@@ -530,7 +534,7 @@ implementation{
             dbg(P4_DBG_CHANNEL, "Transmission initiated!\n");
          }
       }else{
-         dbg(APPLICATION_CHANNEL, "NO CONNECTION ESTABLISHED...\n");
+         dbg(P4_DBG_CHANNEL, "NO CONNECTION ESTABLISHED...\n");
       }
    }
    //send msg to server, server will forward it to the specified user
@@ -538,6 +542,7 @@ implementation{
    event void CommandHandler.whisper(char *user, char *msg){
       char *token;
       error_t error;
+      //dbg(APPLICATION_CHANNEL, "Sending a whisper message to the server...\n");
       if(default_socket != NULL_SOCKET){
          //dbg(P4_DBG_CHANNEL, "Arguments: user:%s , msg:%s\n", user, msg);
          //dbg(APPLICATION_CHANNEL, "Sending Whisper to %s...\n", user);
@@ -565,14 +570,14 @@ implementation{
             dbg(P4_DBG_CHANNEL, "Transmission initiated!\n");
          }
       }else{
-         dbg(APPLICATION_CHANNEL, "NO CONNECTION ESTABLISHED...\n");
+         dbg(P4_DBG_CHANNEL, "NO CONNECTION ESTABLISHED...\n");
       }
       
       dbg(P4_DBG_CHANNEL, "End of whisper\n");
    }
    
    event void CommandHandler.listusr(){
-      dbg(APPLICATION_CHANNEL, "Requesting user list...\n");
+      //dbg(APPLICATION_CHANNEL, "Requesting user list...\n");
       if (default_socket != NULL_SOCKET) {
          // Reset message buffer
          memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
@@ -594,7 +599,7 @@ implementation{
          }
       }
       else {
-         dbg(APPLICATION_CHANNEL, "NO CONNECTION ESTABLISHED...\n");
+         dbg(P4_DBG_CHANNEL, "NO CONNECTION ESTABLISHED...\n");
       }
    }
 
@@ -709,7 +714,7 @@ implementation{
 
    void messageHandler(socket_t fd){
       char *iterator = NULL, *token = NULL, *temp = NULL;
-      socket_t target_fd;
+      socket_t target_fd = NULL_SOCKET;
       bool userFound = FALSE;
       socket_store_t *socketData;
       char tempMessage[SOCKET_BUFFER_SIZE];
@@ -724,6 +729,7 @@ implementation{
       if(strcmp(token, "hello")  == 0){
          token = strtok(NULL, " ");//get next token (username)
          dbg(P4_DBG_CHANNEL, "Found \"hello\"!\nMapping socket[%hhu] to value[%s]\n", fd, token);
+         dbg(APPLICATION_CHANNEL, "User registered: %s\n", token);
          memcpy(connectedUsers[fd], token, strlen(token)+1);
          //not doing anything with message, clearing
          memset(fullMessageBuffer[fd], '\0', SOCKET_BUFFER_SIZE);
@@ -733,6 +739,7 @@ implementation{
          temp = strtok(NULL,"");//message
          //forward message
          dbg(P4_DBG_CHANNEL, "Found \"whisper\" from %s to %s\nMSG:%s\n", connectedUsers[fd], token, temp);
+         dbg(APPLICATION_CHANNEL, "Whispering to %s: %s", token, temp);
          //modify the message in format: whisper <sender>: <msg>
          sprintf(messageBuff, "whisperFrom %s %s", connectedUsers[fd], temp);
          dbg(P4_DBG_CHANNEL, "Modified message: %s\nInitiating transmission...\n", messageBuff);
@@ -746,6 +753,10 @@ implementation{
                dbg(P4_DBG_CHANNEL, "%s is connected to socket[%hhu]\n", token, target_fd);
                break;
             }
+         }
+         if (target_fd == NULL_SOCKET) {
+            dbg(APPLICATION_CHANNEL, "User %s does not exist\n", token);
+            return;
          }
          default_socket = target_fd;
          writeToSocket(default_socket);
@@ -765,55 +776,46 @@ implementation{
       else if(strcmp(token, "whisperFrom") == 0) {
          token = strtok(NULL, " ");
          temp = strtok(NULL, "");
-         dbg(P4_DBG_CHANNEL, "Received a whisper from %s: %s\n", token, temp);
+         dbg(APPLICATION_CHANNEL, "Received a whisper from %s: %s", token, temp);
       }
       else if(strcmp(token, "msg") == 0){
-         temp = strtok(NULL,"");//msg or sender name
-         for(i = 0; i < MAX_NUM_OF_SOCKETS; i++){
-            //check to see if it maches any names
-            if(strcmp(temp, connectedUsers[i]) == 0){
-               //temp is user
-               dbg(P4_DBG_CHANNEL,"%s found a msg\n", temp);
-               dbg(APPLICATION_CHANNEL, "%s\n", fullMessageBuffer[i]);
-               userFound = TRUE;
-               break;
-            }
-         }
-         if(userFound == FALSE){
-            //temp is a msg
-            dbg(P4_DBG_CHANNEL, "Found \"msg\" to %s\nmessage:%s\n",username, temp);
-            //modify the message
-            memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
-            sprintf(messageBuff, "msg %s:%s\n", connectedUsers[fd], temp);
-            dbg(P4_DBG_CHANNEL, "modified message:%s\n",messageBuff);
-            //clear the old data
-            memset(fullMessageBuffer[fd], '\0', SOCKET_BUFFER_SIZE);
-            //transmit the msg to all users
-            for(i=0;i<MAX_NUM_OF_SOCKETS; i++){
-               if(connectedUsers[i][0] != NULL){
-                  if(strcmp(connectedUsers[i], connectedUsers[fd]) != 0){
-                     dbg(P4_DBG_CHANNEL, "**Sending modified message to %s over socket(%hhu)**\n\n", connectedUsers[i], i);
-                     //send mesage to this socket
-                     target_fd = i;
-                     default_socket = target_fd;
-                     socketData = call Transport.getSocketByFd(target_fd);
-                     bytesToTransfer = strlen(messageBuff); 
-                     bytesWrittenSoFar = 0;
-                     writeToSocket(target_fd);
-                     call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);//resert timer to write.
-                     makeTCPPack(&TCPPackage, 0, socketData->dest.port, 0, 0, 0, 5, "Sig. Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
-                     //no flags
-                     TCPPackage.flags = 0;
-                     makePack(&sendPackage, 0, socketData->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
-                     memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
-                     dbg(P4_DBG_CHANNEL, "Sending package to self to signal sendBuffer transmission...\n");
-                     if(call Transport.receive(&sendPackage) == SUCCESS){
-                        dbg(P4_DBG_CHANNEL, "Whisper: Transmission initiated to target user!\n");
-                     }
+         temp = strtok(NULL,""); // the message
+         dbg(P4_DBG_CHANNEL, "Found \"msg\", message: %s\n", temp);
+         
+         //modify the message
+         memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
+         sprintf(messageBuff, "rcvMsg %s", temp);
+         dbg(P4_DBG_CHANNEL, "modified message: %s\n", messageBuff);
+
+         //transmit the msg to all users
+         for(i=0;i<MAX_NUM_OF_SOCKETS; i++){
+            if(connectedUsers[i][0] != NULL){
+               if(strcmp(connectedUsers[i], connectedUsers[fd]) != 0){
+                  dbg(P4_DBG_CHANNEL, "**Sending modified message to %s over socket(%hhu)**\n\n", connectedUsers[i], i);
+                  dbg(APPLICATION_CHANNEL, "Sending a message to %s: %s", connectedUsers[i], temp);
+                  //send mesage to this socket
+                  target_fd = i;
+                  default_socket = target_fd;
+                  socketData = call Transport.getSocketByFd(target_fd);
+                  bytesToTransfer = strlen(messageBuff); 
+                  bytesWrittenSoFar = 0;
+                  writeToSocket(target_fd);
+                  makeTCPPack(&TCPPackage, 0, socketData->dest.port, 0, 0, 0, SOCKET_BUFFER_SIZE, "Sig. Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                  //no flags
+                  TCPPackage.flags = 0;
+                  makePack(&sendPackage, 0, socketData->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+                  memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+                  dbg(P4_DBG_CHANNEL, "Sending package to self to signal sendBuffer transmission...\n");
+                  if(call Transport.receive(&sendPackage) == SUCCESS){
+                     dbg(P4_DBG_CHANNEL, "Whisper: Transmission initiated to target user!\n");
                   }
                }
             }
          }
+      }
+      else if(strcmp(token, "rcvMsg") == 0) {
+         temp = strtok(NULL, "");
+         dbg(APPLICATION_CHANNEL, "Received a message: %s", temp);
       }
       else if(strcmp(tempMessage, "listusr\r\n") == 0){
          dbg(P4_DBG_CHANNEL, "Found \"listusr\" from %s\n", connectedUsers[fd]);
@@ -852,6 +854,10 @@ implementation{
          if (call Transport.receive(&sendPackage) == SUCCESS) {
             dbg(P4_DBG_CHANNEL, "Transmission initiated!\n");
          }
+      }
+      else if (strcmp(token, "listUsrRply") == 0) {
+         temp = strtok(NULL, "");
+         dbg(APPLICATION_CHANNEL, "Received a list of users: %s", temp);
       }
 
       // clear message buffer
