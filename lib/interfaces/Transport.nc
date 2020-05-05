@@ -160,4 +160,6 @@ interface Transport{
 
    //finds the file descriptor for the socket
    command socket_t findSocket(socket_addr_t *srcAddr, socket_addr_t *destAddr);
+   //gets socket_store_t info
+   command socket_store_t* getSocketByFd(socket_t fd);
 }

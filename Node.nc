@@ -62,6 +62,7 @@ implementation{
    uint16_t msgPosition[MAX_NUM_OF_SOCKETS];
    char username[SOCKET_BUFFER_SIZE], messageBuff[SOCKET_BUFFER_SIZE], fullMessageBuffer[MAX_NUM_OF_SOCKETS][SOCKET_BUFFER_SIZE];
    char connectedUsers[MAX_NUM_OF_SOCKETS][SOCKET_BUFFER_SIZE];
+   bool found_r = FALSE, found_n = FALSE;
 
    // Prototypes
    void makePack(pack *Package, uint16_t src, uint16_t dest, uint16_t TTL, uint16_t Protocol, uint16_t seq, uint8_t *payload, uint8_t length);
@@ -529,7 +530,7 @@ implementation{
          // make an empty packet to signal Transport layer to begin sending
          // packet will determine where to send the message.
          // send packet to itself, src addr/port: 0/0, dest addr/port: 1/41
-         makeTCPPack(&TCPPackage, 0, 41, 0, 0, 0, 1, "Signal Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
+         makeTCPPack(&TCPPackage, 0, 41, 0, 0, 0, 5, "Signal Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
          //no flags
          TCPPackage.flags = 0;
          makePack(&sendPackage, TOS_NODE_ID, 1, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
@@ -542,7 +543,7 @@ implementation{
          dbg(APPLICATION_CHANNEL, "NO CONNECTION ESTABLISHED...\n");
       }
       
-
+      dbg(P4_DBG_CHANNEL, "End of whisper\n");
    }
    
    event void CommandHandler.listusr(){dbg(APPLICATION_CHANNEL, "Requesting user list...\n");}
@@ -651,7 +652,7 @@ implementation{
          numbersRead = call Transport.read(fd, buff, SOCKET_BUFFER_SIZE);
          //dbg(P4_DBG_CHANNEL, "msgPos[fd:%hhu]: %hhu\t AFTER read()\n", fd, msgPosition[fd]);
          if(numbersWrittenSoFar != 0){
-            dbg(P4_DBG_CHANNEL, "letters written so far: %hhu\n", numbersWrittenSoFar);
+            //dbg(P4_DBG_CHANNEL, "letters written so far: %hhu\n", numbersWrittenSoFar);
          }
          // Print out the numbers
 
@@ -659,25 +660,50 @@ implementation{
          k = msgPosition[fd];
          for (j = 0; j < numbersRead; j++) {
             memcpy(&letter, &buff[j], 1);
-            dbg(GENERAL_CHANNEL, "Socket(%hhu)-Received letter: %c\twriting to buffer[%hhu + %hhu]\n", fd, letter, k, j);
+            dbg(GENERAL_CHANNEL, "Socket(%hhu)-Received letter: [%hhu]->[%c]\twriting to buffer[%hhu + %hhu]\n", fd,letter, letter, k, j);
             fullMessageBuffer[fd][k+j] = buff[j];
             msgPosition[fd]++;
-            if(buff[j] == '\r' && buff[j+1] == '\n'){
-               fullMessageBuffer[fd][k+j+1] = buff[j+1];
-               dbg(P4_DBG_CHANNEL, "\nEND OF MSG DETECTED!\n[\\r]&&[\\n]\nMsg Stored: %s\n\n", fullMessageBuffer[fd]);
-               //handle full message
-               messageHandler(fd);
-               //end of message, reset values
-               //dbg(P4_DBG_CHANNEL, "\n\nmsgPosition[%hhu]:%hhu is reset to 0\n\n", fd, msgPosition[fd]);
-               msgPosition[fd] = 0;
-               k = 0;
-               memset(fullMessageBuffer[fd], '\0', SOCKET_BUFFER_SIZE);
-               //this assumes 1 message at a time to read per socket
-               break;//QUICK FIX SINCE msgPOS keeps incrementing at the end of msg
+            if(buff[j] == '\r'){
+               dbg(P4_DBG_CHANNEL, "Found \\r\n");
+               found_r = TRUE;
             }
+            if( buff[j] == '\n'){
+                  dbg(P4_DBG_CHANNEL, "Found \\n\n");
+                  found_n = TRUE;
+            }
+            if(found_r == TRUE && found_n == TRUE){
+                  dbg(P4_DBG_CHANNEL, "\nEND OF MSG DETECTED!\n[\\r]&&[\\n]\nMsg Stored: %s\n\n", fullMessageBuffer[fd]);
+                  //handle full message
+                  messageHandler(fd);
+                  //end of message, reset values
+                  //dbg(P4_DBG_CHANNEL, "\n\nmsgPosition[%hhu]:%hhu is reset to 0\n\n", fd, msgPosition[fd]);
+                  msgPosition[fd] = 0;
+                  k = 0;
+                  found_r = FALSE;
+                  found_n = FALSE;
+                  //this assumes 1 message at a time to read per socket
+                  break;//QUICK FIX SINCE msgPOS keeps incrementing at the end of msg
+               }
+            /*if(buff[j] == '\r'){
+               dbg(P4_DBG_CHANNEL, "Found \\r\n");
+               if( buff[j+1] == '\n'){
+                  dbg(P4_DBG_CHANNEL, "Found \\n\n");
+                  fullMessageBuffer[fd][k+j+1] = buff[j+1];
+                  dbg(P4_DBG_CHANNEL, "\nEND OF MSG DETECTED!\n[\\r]&&[\\n]\nMsg Stored: %s\n\n", fullMessageBuffer[fd]);
+                  //handle full message
+                  messageHandler(fd);
+                  //end of message, reset values
+                  //dbg(P4_DBG_CHANNEL, "\n\nmsgPosition[%hhu]:%hhu is reset to 0\n\n", fd, msgPosition[fd]);
+                  msgPosition[fd] = 0;
+                  k = 0;
+                  //this assumes 1 message at a time to read per socket
+                  break;//QUICK FIX SINCE msgPOS keeps incrementing at the end of msg
+               }
+            }*/
          }
       }
-
+               if(numbersRead != 0)
+            dbg(P4_DBG_CHANNEL, "Done reading from buffer...\n");
    }
 
    event void CommandHandler.setAppServer(){}
@@ -699,6 +725,8 @@ implementation{
 
    void messageHandler(socket_t fd){
       char *iterator = NULL, *token = NULL, *temp = NULL;
+      socket_t target_fd;
+      socket_store_t *socketData;
       char tempMessage[SOCKET_BUFFER_SIZE];
       uint32_t keys, i;
       memcpy(tempMessage, fullMessageBuffer[fd], SOCKET_BUFFER_SIZE);
@@ -710,11 +738,54 @@ implementation{
          token = strtok(NULL, " ");//get next token (username)
          dbg(P4_DBG_CHANNEL, "Found \"hello\"!\nMapping socket[%hhu] to value[%s]\n", fd, token);
          memcpy(connectedUsers[fd], token, strlen(token)+1);
+         //not doing anything with message, clearing
+         memset(fullMessageBuffer[fd], '\0', SOCKET_BUFFER_SIZE);
       }
       if(strcmp(token, "whisper") == 0){
-         token = strtok(NULL, " ");
-         temp = strtok(NULL,"");
-         dbg(P4_DBG_CHANNEL, "Found \"whisper\" from %s to %s\nMSG:%s\n", connectedUsers[fd], token, temp);
+         token = strtok(NULL, " ");//intended receivername, connectedUsers[fd] is sender name
+         temp = strtok(NULL,"");//message
+         //check if we are intended user
+         if(strcmp(token, username) == 0){
+               //received whisper
+               dbg(APPLICATION_CHANNEL, "%s\n", fullMessageBuffer[fd]);
+               //clear message cuz we got what we needed.
+               memset(fullMessageBuffer[fd], '\0', SOCKET_BUFFER_SIZE);
+         }else{
+            //forward message
+            dbg(P4_DBG_CHANNEL, "Found \"whisper\" from %s to %s\nMSG:%s\n", connectedUsers[fd], token, temp);
+            //modify the message in format: whisper <sender>: <msg>
+            sprintf(messageBuff, "whisper %s: %s", connectedUsers[fd], temp);
+            dbg(P4_DBG_CHANNEL, "Modified message: %s\nInitiating transmission...\n", messageBuff);
+            //prepare for transmission
+            numbersToTransfer = strlen(messageBuff);
+            numbersWrittenSoFar = 0;
+            //find the socket with the intended receiver and change it to the default socket
+            for(i=0; i < MAX_NUM_OF_SOCKETS; i++){
+               if(strcmp(connectedUsers[i], token) == 0){
+                  target_fd = i;
+                  dbg(P4_DBG_CHANNEL, "%s is connected to socket[%hhu]\n", token, target_fd);
+                  break;
+               }
+            }
+            default_socket = target_fd;
+            socketData = call Transport.getSocketByFd(target_fd);
+            beginWrite();
+            call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);//resert timer to write.
+            // make an empty packet to signal Transport layer to begin sending
+            // packet will determine where to send the message.
+            // destination is target_fd's src
+            makeTCPPack(&TCPPackage, 0, socketData->dest.port, 0, 0, 0, 5, "Sig. Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
+            //no flags
+            TCPPackage.flags = 0;
+            makePack(&sendPackage, 0, socketData->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+            memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+            dbg(P4_DBG_CHANNEL, "Sending package to self to signal sendBuffer transmission...\n");
+            if(call Transport.receive(&sendPackage) == SUCCESS){
+               dbg(P4_DBG_CHANNEL, "Whisper: Transmission initiated to target user!\n");
+            }
+         }
+
+
       }
       //"msg", broadcast message to all users connected
       //"whisper", send message to specified username

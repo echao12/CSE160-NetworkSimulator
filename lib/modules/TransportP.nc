@@ -631,7 +631,7 @@ implementation{
                 socket->effectiveWindow = 0;
             }
         }
-        dbg(TRANSPORT_CHANNEL, "AdvertisedWindow %hhu  Effective Window %hhu\n", advertisedWindow, socket->effectiveWindow);
+        //dbg(TRANSPORT_CHANNEL, "AdvertisedWindow %hhu  Effective Window %hhu\n", advertisedWindow, socket->effectiveWindow);
 
 
         // Calculate this socket's advertisedWindow
@@ -656,7 +656,7 @@ implementation{
                     break;
                 }
 
-                dbg(TRANSPORT_CHANNEL, "Packaging %hhu\n", socket->sendBuff[bytePos]);
+                dbg(P4_DBG_CHANNEL, "Packaging %c\n", socket->sendBuff[bytePos]);
                 TCPPackage.payload[j] = socket->sendBuff[bytePos];
                 socket->lastSent = bytePos;
                 isEmpty = FALSE;
@@ -677,6 +677,7 @@ implementation{
             memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
 
             signal Transport.send(&sendPackage);
+            dbg(P4_DBG_CHANNEL, "package sent\n");
             makeOutstanding(sendPackage, RTT_ESTIMATE);
             packetsSent++;
         }
@@ -915,6 +916,10 @@ implementation{
         return socketNum;
     }
 
+    command socket_store_t* Transport.getSocketByFd(socket_t fd){
+        return getSocketPtr(fd);
+    }
+
     event void resendTimer.fired() {
         // When this timer fires, resend the earliest outstanding packet
         pack packet;
@@ -929,16 +934,6 @@ implementation{
         if (call outstandingPackets.isEmpty()) {
             // Nothing to retransmit, reset the timer
             call resendTimer.startOneShotAt(t0, RTT_ESTIMATE);
-            // Also send packets if there's something in the buffer
-            for (i = 1; i < MAX_NUM_OF_SOCKETS; i++) {
-                socket = getSocketPtr(i);
-                if (socket == NULL) {
-                    break;
-                }
-                if (socket->bufferSpace < SOCKET_BUFFER_SIZE) {
-                    sendFromBuffer(socket, 8);
-                }
-            }
             return;
         }
 
@@ -1094,6 +1089,7 @@ implementation{
             }
         }
     }
+
 
     void removeSocketFromList(socket_t fd){
         bool found = FALSE;
