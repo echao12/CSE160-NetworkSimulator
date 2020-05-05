@@ -507,7 +507,29 @@ implementation{
    }
    
    //send message to server, which will broadcast the msg to all connected users.
-   event void CommandHandler.message(char *msg){dbg(APPLICATION_CHANNEL, "Sending message...\n");}
+   event void CommandHandler.message(char *msg){
+      if(default_socket != NULL){
+         dbg(APPLICATION_CHANNEL, "Sending message...\n");
+         //generate the message
+         memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
+         sprintf(messageBuff, "msg %s\r\n", msg);
+         numbersToTransfer = strlen(messageBuff);
+         numbersWrittenSoFar = 0;
+         beginWrite();
+         call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);
+         makeTCPPack(&TCPPackage, 0, 41, 0, 0, 0, 5, "Signal Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
+         //no flags
+         TCPPackage.flags = 0;
+         makePack(&sendPackage, TOS_NODE_ID, 1, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+         memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+         dbg(P4_DBG_CHANNEL, "Sending package to self to signal sendBuffer transmission...\n");
+         if(call Transport.receive(&sendPackage) == SUCCESS){
+            dbg(P4_DBG_CHANNEL, "Transmission initiated!\n");
+         }
+      }else{
+         dbg(APPLICATION_CHANNEL, "NO CONNECTION ESTABLISHED...\n");
+      }
+   }
    //send msg to server, server will forward it to the specified user
    //include sending client's name
    event void CommandHandler.whisper(char *user, char *msg){
@@ -726,6 +748,7 @@ implementation{
    void messageHandler(socket_t fd){
       char *iterator = NULL, *token = NULL, *temp = NULL;
       socket_t target_fd;
+      bool userFound = FALSE;
       socket_store_t *socketData;
       char tempMessage[SOCKET_BUFFER_SIZE];
       uint32_t keys, i;
@@ -784,8 +807,48 @@ implementation{
                dbg(P4_DBG_CHANNEL, "Whisper: Transmission initiated to target user!\n");
             }
          }
-
-
+      }
+      if(strcmp(token, "msg") == 0){
+         temp = strtok(NULL,"");//msg or sender name
+         for(i = 0; i < MAX_NUM_OF_SOCKETS; i++){
+            //check to see if it maches any names
+            if(strcmp(temp, connectedUsers[i]) == 0){
+               //temp is user
+               dbg(P4_DBG_CHANNEL,"Found a user, display msg\n");
+               dbg(APPLICATION_CHANNEL, "%s", fullMessageBuffer[i]);
+               userFound = TRUE;
+               break;
+            }
+         }
+         if(userFound == FALSE){
+            //temp is a msg
+            dbg(P4_DBG_CHANNEL, "Found \"msg\" from %s\nmessage:%s\n", connectedUsers[fd], temp);
+            //modify the message
+            memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
+            sprintf(messageBuff, "msg %s:%s", connectedUsers[fd], temp);
+            //clear the old data
+            memset(fullMessageBuffer[fd], '\0', SOCKET_BUFFER_SIZE);
+            //transmit the msg to all users
+            for(i=0;i<MAX_NUM_OF_SOCKETS; i++){
+               if(strcmp(connectedUsers[i], connectedUsers[fd]) != 0 && connectedUsers[i] != NULL){
+                  //send mesage to this socket
+                  target_fd = i;
+                  default_socket = target_fd;
+                  socketData = call Transport.getSocketByFd(target_fd);
+                  beginWrite();
+                  call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);//resert timer to write.
+                  makeTCPPack(&TCPPackage, 0, socketData->dest.port, 0, 0, 0, 5, "Sig. Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                  //no flags
+                  TCPPackage.flags = 0;
+                  makePack(&sendPackage, 0, socketData->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+                  memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+                  dbg(P4_DBG_CHANNEL, "Sending package to self to signal sendBuffer transmission...\n");
+                  if(call Transport.receive(&sendPackage) == SUCCESS){
+                     dbg(P4_DBG_CHANNEL, "Whisper: Transmission initiated to target user!\n");
+                  }
+               }
+            }
+         }
       }
       //"msg", broadcast message to all users connected
       //"whisper", send message to specified username
