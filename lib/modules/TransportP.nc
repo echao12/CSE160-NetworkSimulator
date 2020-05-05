@@ -677,7 +677,7 @@ implementation{
             memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
 
             signal Transport.send(&sendPackage);
-            dbg(P4_DBG_CHANNEL, "package sent\n");
+            dbg(P4_DBG_CHANNEL, "package sent to [%hhu][%hhu]\n", socket->dest.addr, socket->dest.port);
             makeOutstanding(sendPackage, RTT_ESTIMATE);
             packetsSent++;
         }

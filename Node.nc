@@ -58,7 +58,7 @@ implementation{
 
    // TCP-related variables
    socket_t default_socket = NULL_SOCKET;
-   uint16_t numbersToTransfer = 0, numbersWrittenSoFar = 0;
+   uint16_t bytesToTransfer = 0, bytesWrittenSoFar = 0;
    uint16_t msgPosition[MAX_NUM_OF_SOCKETS];
    char username[SOCKET_BUFFER_SIZE], messageBuff[SOCKET_BUFFER_SIZE], fullMessageBuffer[MAX_NUM_OF_SOCKETS][SOCKET_BUFFER_SIZE];
    char connectedUsers[MAX_NUM_OF_SOCKETS][SOCKET_BUFFER_SIZE];
@@ -71,7 +71,7 @@ implementation{
    void incrementSequence();
    void updateNeighbors(uint16_t src);
    void messageHandler(socket_t fd);
-   void beginWrite();
+   void writeToSocket(socket_t fd);
 
    //TinyOS Boot sequence completed, each mote calls this function.
    event void Boot.booted(){
@@ -90,13 +90,13 @@ implementation{
       }
 
       // Set timer for sending packets
-      call packetsTimer.startPeriodic(200 + (call Random.rand16() % 50));
+      call packetsTimer.startPeriodic(200 + (call Random.rand16() % 100));
       
       // Set timer for neighbor discovery
-      call neighborTimer.startPeriodic(4000 + (call Random.rand16() % 2000));
+      call neighborTimer.startPeriodic(5000 + (call Random.rand16() % 1000));
       
       // Set timer for routing table broadcast
-      call routingTimer.startPeriodic(10000 + (call Random.rand16() % 5000));
+      call routingTimer.startPeriodic(20000 + (call Random.rand16() % 5000));
 
       // Add route to self to the routing table
       // *note* destination 0 indicates a route to self.
@@ -450,7 +450,7 @@ implementation{
          call Transport.connect(socket, &destinationAddress);
          default_socket = socket;
          call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);
-         numbersToTransfer = transfer;
+         bytesToTransfer = transfer;
       }
    }
 
@@ -490,8 +490,8 @@ implementation{
       //generate msg
       memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
       sprintf(messageBuff, "hello %s %hhu\r\n", username, clientPort);
-      numbersToTransfer = strlen(messageBuff);
-      dbg(APPLICATION_CHANNEL, "HELLO MESSAGE[%hhu]: %s\n", numbersToTransfer, messageBuff);
+      bytesToTransfer = strlen(messageBuff);
+      dbg(APPLICATION_CHANNEL, "HELLO MESSAGE[%hhu]: %s\n", bytesToTransfer, messageBuff);
       
       //generate a socket
       sourceAddress.addr = TOS_NODE_ID;
@@ -511,14 +511,14 @@ implementation{
    
    //send message to server, which will broadcast the msg to all connected users.
    event void CommandHandler.message(char *msg){
-      if(default_socket != NULL){
+      if(default_socket != NULL_SOCKET){
          dbg(APPLICATION_CHANNEL, "Sending message...\n");
          //generate the message
          memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
          sprintf(messageBuff, "msg %s\r\n", msg);
-         numbersToTransfer = strlen(messageBuff);
-         numbersWrittenSoFar = 0;
-         beginWrite();
+         bytesToTransfer = strlen(messageBuff);
+         bytesWrittenSoFar = 0;
+         writeToSocket(default_socket);
          call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);
          makeTCPPack(&TCPPackage, 0, 41, 0, 0, 0, 5, "Signal Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
          //no flags
@@ -538,7 +538,7 @@ implementation{
    event void CommandHandler.whisper(char *user, char *msg){
       char *token;
       error_t error;
-      if(default_socket != NULL){
+      if(default_socket != NULL_SOCKET){
          //dbg(P4_DBG_CHANNEL, "Arguments: user:%s , msg:%s\n", user, msg);
          //dbg(APPLICATION_CHANNEL, "Sending Whisper to %s...\n", user);
          //break down the arguments
@@ -547,10 +547,10 @@ implementation{
          memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
          sprintf(messageBuff, "whisper %s %s\r\n", token, strtok(NULL,"\n"));
          //reset values for writing since new msg
-         numbersToTransfer = strlen(messageBuff);
-         numbersWrittenSoFar = 0;
-         dbg(P4_DBG_CHANNEL, "WHISPER(%hhu): %s\n",numbersToTransfer, messageBuff);
-         beginWrite();
+         bytesToTransfer = strlen(messageBuff);
+         bytesWrittenSoFar = 0;
+         dbg(P4_DBG_CHANNEL, "WHISPER(%hhu): %s\n",bytesToTransfer, messageBuff);
+         writeToSocket(default_socket);
          call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);//resert timer to write.
          // make an empty packet to signal Transport layer to begin sending
          // packet will determine where to send the message.
@@ -573,15 +573,15 @@ implementation{
    
    event void CommandHandler.listusr(){
       dbg(APPLICATION_CHANNEL, "Requesting user list...\n");
-      if (default_socket != NULL) {
+      if (default_socket != NULL_SOCKET) {
          // Reset message buffer
          memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
          sprintf(messageBuff, "listusr\r\n");
-         numbersToTransfer = strlen(messageBuff);
-         numbersWrittenSoFar = 0;
+         bytesToTransfer = strlen(messageBuff);
+         bytesWrittenSoFar = 0;
 
          // Write to send buffer
-         beginWrite();
+         writeToSocket(default_socket);
          call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER); // reset timer
 
          // Send an empty packet to self to start transmission
@@ -599,97 +599,32 @@ implementation{
    }
 
    event void TCPWriteTimer.fired() {
-      /*
-      // Create an array and fill it with numbers
-      uint8_t buff[SOCKET_BUFFER_SIZE];
-      //going to send messages now, make them chars
-      uint16_t i, num, numbersToWrite;
-
-      numbersToWrite = numbersToTransfer - numbersWrittenSoFar;
-      if (numbersToWrite == 0) {
-         // All numbers have been written
-         return;
-      }
-      else if (numbersToWrite > SOCKET_BUFFER_SIZE/2) {
-         // Limit the amount of numbers written to the maximum space available
-         numbersToWrite = SOCKET_BUFFER_SIZE/2;
-      }
-
-      // Fill the array with numbers
-      for (i = 0; i < numbersToWrite; i++) {
-         num = numbersWrittenSoFar + i + 1;
-         memcpy(&buff[i*2], &num, 2);
-      }
-
-      // Ask the Transport module to write as much as it can
-      i = call Transport.write(default_socket, buff, numbersToWrite*2);
-      numbersWrittenSoFar += i/2;
-      */
-          
-            //IGNORE THIS FOR NOW, DECIDED TO SAVE IT BUT NEED TO FINISH 
-            //SERVER CONNECTION ESTABLISHMENT FIRST
-
-            // Create an array and fill it with numbers
-      //uint8_t buff[SOCKET_BUFFER_SIZE];
-      //going to send messages now, make them chars
-      uint16_t i, num, numbersToWrite;//numbers will be letters
-      //dbg(APPLICATION_CHANNEL, "TCPWriteTimer Fired!...\n");
-      numbersToWrite = numbersToTransfer - numbersWrittenSoFar;
-      if (numbersToWrite == 0) {
-         // No numbers to write
-         return;
-      }
-      //else if (numbersToWrite > SOCKET_BUFFER_SIZE/2) {
-      else if (numbersToWrite > SOCKET_BUFFER_SIZE) {
-         // Limit the amount of numbers written to the maximum space available
-         numbersToWrite = SOCKET_BUFFER_SIZE;
-      }
-
-      
-      // Fill the array with numbers
-      //for (i = 0; i < numbersToWrite; i++) {
-      //   num = numbersWrittenSoFar + i + 1;
-      //   memcpy(&buff[i*2], &num, 2);
-      //}
-      
-      // Ask the Transport module to write as much as it can
-      //i = call Transport.write(default_socket, buff, numbersToWrite*2);
-      i = call Transport.write(default_socket, messageBuff, numbersToWrite);
-      numbersWrittenSoFar += i;
-      
+      writeToSocket(default_socket);
    }
-   //same as TCPWriteTimer.fired() but for immediate write
-   void beginWrite(){
-      uint16_t i, num, numbersToWrite;//numbers will be letters
-      //dbg(APPLICATION_CHANNEL, "TCPWriteTimer Fired!...\n");
-      numbersToWrite = numbersToTransfer - numbersWrittenSoFar;
-      if (numbersToWrite == 0) {
-         // All numbers have been written
+
+   // Write current content of messageBuff to the specified socket
+   void writeToSocket(socket_t fd){
+      uint16_t i, num, bytesToWrite;
+
+      bytesToWrite = bytesToTransfer - bytesWrittenSoFar;
+      if (bytesToWrite == 0) {
+         // No bytes to write
          return;
       }
-      //else if (numbersToWrite > SOCKET_BUFFER_SIZE/2) {
-      else if (numbersToWrite > SOCKET_BUFFER_SIZE) {
+      else if (bytesToWrite > SOCKET_BUFFER_SIZE) {
          // Limit the amount of numbers written to the maximum space available
-         numbersToWrite = SOCKET_BUFFER_SIZE;
+         bytesToWrite = SOCKET_BUFFER_SIZE;
       }
-
-      
-      // Fill the array with numbers
-      //for (i = 0; i < numbersToWrite; i++) {
-      //   num = numbersWrittenSoFar + i + 1;
-      //   memcpy(&buff[i*2], &num, 2);
-      //}
       
       // Ask the Transport module to write as much as it can
-      //i = call Transport.write(default_socket, buff, numbersToWrite*2);
-      i = call Transport.write(default_socket, messageBuff, numbersToWrite);
-      numbersWrittenSoFar += i;
+      i = call Transport.write(fd, messageBuff, bytesToWrite);
+      bytesWrittenSoFar += i;
    }
 
    event void TCPReadTimer.fired() {
       //uint8_t buff[SOCKET_BUFFER_SIZE];
       char buff[SOCKET_BUFFER_SIZE];
-      uint16_t i, j, k, num, numbersRead, numSockets;
+      uint16_t i, j, k, num, bytesRead, numSockets;
       char letter;
       socket_t fd;
 
@@ -698,17 +633,16 @@ implementation{
          fd = call socketList.get(i);
          //dbg(P4_DBG_CHANNEL, "msgPos[fd:%hhu]: %hhu\t BEFORE read()\n", fd, msgPosition[fd]);
          // Read the socket's buffer
-         //numbersRead = call Transport.read(fd, buff, SOCKET_BUFFER_SIZE) / 2;
-         numbersRead = call Transport.read(fd, buff, SOCKET_BUFFER_SIZE);
+         bytesRead = call Transport.read(fd, buff, SOCKET_BUFFER_SIZE);
          //dbg(P4_DBG_CHANNEL, "msgPos[fd:%hhu]: %hhu\t AFTER read()\n", fd, msgPosition[fd]);
-         if(numbersWrittenSoFar != 0){
-            //dbg(P4_DBG_CHANNEL, "letters written so far: %hhu\n", numbersWrittenSoFar);
+         if(bytesWrittenSoFar != 0){
+            //dbg(P4_DBG_CHANNEL, "letters written so far: %hhu\n", bytesWrittenSoFar);
          }
          // Print out the numbers
 
          //could try numbersRead-1 and j++ at the end of if statement in case break; needs to be removed
          k = msgPosition[fd];
-         for (j = 0; j < numbersRead; j++) {
+         for (j = 0; j < bytesRead; j++) {
             memcpy(&letter, &buff[j], 1);
             dbg(GENERAL_CHANNEL, "Socket(%hhu)-Received letter: [%hhu]->[%c]\twriting to buffer[%hhu + %hhu]\n", fd,letter, letter, k, j);
             fullMessageBuffer[fd][k+j] = buff[j];
@@ -722,18 +656,18 @@ implementation{
                   found_n = TRUE;
             }
             if(found_r == TRUE && found_n == TRUE){
-                  dbg(P4_DBG_CHANNEL, "\nEND OF MSG DETECTED!\n[\\r]&&[\\n]\nMsg Stored: %s\n\n", fullMessageBuffer[fd]);
-                  //handle full message
-                  messageHandler(fd);
-                  //end of message, reset values
-                  //dbg(P4_DBG_CHANNEL, "\n\nmsgPosition[%hhu]:%hhu is reset to 0\n\n", fd, msgPosition[fd]);
-                  msgPosition[fd] = 0;
-                  k = 0;
-                  found_r = FALSE;
-                  found_n = FALSE;
-                  //this assumes 1 message at a time to read per socket
-                  break;//QUICK FIX SINCE msgPOS keeps incrementing at the end of msg
-               }
+               dbg(P4_DBG_CHANNEL, "\nEND OF MSG DETECTED!\n[\\r]&&[\\n]\nMsg Stored: %s\n\n", fullMessageBuffer[fd]);
+               //handle full message
+               messageHandler(fd);
+               //end of message, reset values
+               //dbg(P4_DBG_CHANNEL, "\n\nmsgPosition[%hhu]:%hhu is reset to 0\n\n", fd, msgPosition[fd]);
+               msgPosition[fd] = 0;
+               k = 0;
+               found_r = FALSE;
+               found_n = FALSE;
+               //this assumes 1 message at a time to read per socket
+               break;//QUICK FIX SINCE msgPOS keeps incrementing at the end of msg
+            }
             /*if(buff[j] == '\r'){
                dbg(P4_DBG_CHANNEL, "Found \\r\n");
                if( buff[j+1] == '\n'){
@@ -810,8 +744,8 @@ implementation{
             sprintf(messageBuff, "whisper %s: %s", connectedUsers[fd], temp);
             dbg(P4_DBG_CHANNEL, "Modified message: %s\nInitiating transmission...\n", messageBuff);
             //prepare for transmission
-            numbersToTransfer = strlen(messageBuff);
-            numbersWrittenSoFar = 0;
+            bytesToTransfer = strlen(messageBuff);
+            bytesWrittenSoFar = 0;
             //find the socket with the intended receiver and change it to the default socket
             for(i=0; i < MAX_NUM_OF_SOCKETS; i++){
                if(strcmp(connectedUsers[i], token) == 0){
@@ -821,12 +755,12 @@ implementation{
                }
             }
             default_socket = target_fd;
-            socketData = call Transport.getSocketByFd(target_fd);
-            beginWrite();
+            writeToSocket(default_socket);
             call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);//resert timer to write.
             // make an empty packet to signal Transport layer to begin sending
             // packet will determine where to send the message.
             // destination is target_fd's src
+            socketData = call Transport.getSocketByFd(target_fd);
             makeTCPPack(&TCPPackage, 0, socketData->dest.port, 0, 0, 0, 5, "Sig. Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
             //no flags
             TCPPackage.flags = 0;
@@ -868,7 +802,7 @@ implementation{
                      target_fd = i;
                      default_socket = target_fd;
                      socketData = call Transport.getSocketByFd(target_fd);
-                     beginWrite();
+                     writeToSocket(target_fd);
                      call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);//resert timer to write.
                      makeTCPPack(&TCPPackage, 0, socketData->dest.port, 0, 0, 0, 5, "Sig. Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
                      //no flags
@@ -907,12 +841,12 @@ implementation{
          strncat(messageBuff, &returnchr, 1);
          strncat(messageBuff, &newlinechr, 1);
          dbg(P4_DBG_CHANNEL, "message: %s\n", messageBuff);
-         numbersToTransfer = strlen(messageBuff);
-         numbersWrittenSoFar = 0;
+         bytesToTransfer = strlen(messageBuff);
+         bytesWrittenSoFar = 0;
 
          // Write the message to send buffer
          default_socket = fd;
-         beginWrite();
+         writeToSocket(default_socket);
          call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER); // reset timer
 
          // Send a packet to self to start transmission
