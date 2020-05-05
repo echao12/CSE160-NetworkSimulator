@@ -728,7 +728,7 @@ implementation{
          //not doing anything with message, clearing
          memset(fullMessageBuffer[fd], '\0', SOCKET_BUFFER_SIZE);
       }
-      if(strcmp(token, "whisper") == 0){
+      else if(strcmp(token, "whisper") == 0){
          token = strtok(NULL, " ");//intended receivername, connectedUsers[fd] is sender name
          temp = strtok(NULL,"");//message
          //check if we are intended user
@@ -741,7 +741,7 @@ implementation{
             //forward message
             dbg(P4_DBG_CHANNEL, "Found \"whisper\" from %s to %s\nMSG:%s\n", connectedUsers[fd], token, temp);
             //modify the message in format: whisper <sender>: <msg>
-            sprintf(messageBuff, "whisper %s: %s", connectedUsers[fd], temp);
+            sprintf(messageBuff, "whisperFrom %s %s", connectedUsers[fd], temp);
             dbg(P4_DBG_CHANNEL, "Modified message: %s\nInitiating transmission...\n", messageBuff);
             //prepare for transmission
             bytesToTransfer = strlen(messageBuff);
@@ -772,7 +772,12 @@ implementation{
             }
          }
       }
-      if(strcmp(token, "msg") == 0){
+      else if(strcmp(token, "whisperFrom") == 0) {
+         token = strtok(NULL, " ");
+         temp = strtok(NULL, "");
+         dbg(P4_DBG_CHANNEL, "Received a whisper from %s: %s\n", token, temp);
+      }
+      else if(strcmp(token, "msg") == 0){
          temp = strtok(NULL,"");//msg or sender name
          for(i = 0; i < MAX_NUM_OF_SOCKETS; i++){
             //check to see if it maches any names
@@ -820,10 +825,7 @@ implementation{
             }
          }
       }
-      //"msg", broadcast message to all users connected
-      //"whisper", send message to specified username
-      //"listusr", output all connected users
-      if(strcmp(tempMessage, "listusr\r\n") == 0){
+      else if(strcmp(tempMessage, "listusr\r\n") == 0){
          dbg(P4_DBG_CHANNEL, "Found \"listusr\" from %s\n", connectedUsers[fd]);
          // Write a reply containing the list of all connected users
          memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);

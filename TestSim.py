@@ -159,7 +159,7 @@ class TestSim:
         self.sendCMD(self.CMD_MESSAGE, source, "{0}".format(message));
 
     def whisper(self, source, dest_username, message):
-        self.sendCMD(self.CMD_WHISPER, source, "{0}{1}".format(dest_username, message));
+        self.sendCMD(self.CMD_WHISPER, source, "{0} {1}".format(dest_username, message));
     
     def listusr(self, source):
         self.sendCMD(self.CMD_LISTUSR, source, "list users");
