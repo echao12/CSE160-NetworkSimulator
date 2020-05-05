@@ -19,6 +19,7 @@ def main():
     # Add the main channels. These channels are declared in includes/channels.h
     s.addChannel(s.COMMAND_CHANNEL);
     s.addChannel(s.GENERAL_CHANNEL);
+    s.addChannel(s.TRANSPORT_CHANNEL);
     s.addChannel(s.APPLICATION_CHANNEL);
     s.addChannel(s.P4_DBG_CHANNEL);
 
@@ -31,18 +32,19 @@ def main():
     #s.testServer(1, 200);#mote,port
     s.runTime(60);
     s.hello(3, "Eric", 30);
-    s.runTime(660);
+    s.runTime(1000);
     s.hello(2, "Michael", 20);
-    s.runTime(600);
-    s.message(3, "PENTAKILL");
-    s.runTime(100);
+    s.runTime(500);
+    s.hello(4, "Samantha", 40);
+    s.runTime(2000);
+    #s.message(3, "PENTAKILL");
+    #s.runTime(100);
     #python, for some stupid reason, combines the 2 strings into 1...
     #ganna use whitespace after username as delimiter
-    s.whisper(3, "Michael ", "MID MIA");
-    s.runTime(600);
+    #s.whisper(3, "Michael ", "MID MIA");
+    #s.runTime(600);
     s.listusr(3);
-
-    s.runTime(100);
+    s.runTime(2000);
 
 if __name__ == '__main__':
     main()

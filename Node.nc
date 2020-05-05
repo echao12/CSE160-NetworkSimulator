@@ -101,6 +101,10 @@ implementation{
       // Add route to self to the routing table
       // *note* destination 0 indicates a route to self.
       call routingTable.mergeRoute(makeRoute(TOS_NODE_ID, 0, 0, MAX_ROUTE_TTL));
+
+      // Set timer for TCP write/read
+      call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);
+      call TCPReadTimer.startPeriodic(TCP_READ_TIMER);
    }
 
    event void AMControl.startDone(error_t err){
@@ -419,7 +423,6 @@ implementation{
          //modified socket state to listen
          dbg(TRANSPORT_CHANNEL, "Server: Listening at socket (%hhu)...\n", fd);
          default_socket = fd;
-         call TCPReadTimer.startPeriodic(TCP_READ_TIMER);
       }
       else {
          dbg(TRANSPORT_CHANNEL, "Server: FAILED to switch socket(%hhu)'s state to LISTEN...\n", fd);
@@ -568,7 +571,32 @@ implementation{
       dbg(P4_DBG_CHANNEL, "End of whisper\n");
    }
    
-   event void CommandHandler.listusr(){dbg(APPLICATION_CHANNEL, "Requesting user list...\n");}
+   event void CommandHandler.listusr(){
+      dbg(APPLICATION_CHANNEL, "Requesting user list...\n");
+      if (default_socket != NULL) {
+         // Reset message buffer
+         memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
+         sprintf(messageBuff, "listusr\r\n");
+         numbersToTransfer = strlen(messageBuff);
+         numbersWrittenSoFar = 0;
+
+         // Write to send buffer
+         beginWrite();
+         call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER); // reset timer
+
+         // Send an empty packet to self to start transmission
+         makeTCPPack(&TCPPackage, 0, 41, 0, 0, 0, 1, "Signal Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
+         makePack(&sendPackage, TOS_NODE_ID, 1, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+         memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+         dbg(P4_DBG_CHANNEL, "Sending package to self to signal sendBuffer transmission...\n");
+         if (call Transport.receive(&sendPackage) == SUCCESS) {
+            dbg(P4_DBG_CHANNEL, "Transmission initiated!\n");
+         }
+      }
+      else {
+         dbg(APPLICATION_CHANNEL, "NO CONNECTION ESTABLISHED...\n");
+      }
+   }
 
    event void TCPWriteTimer.fired() {
       /*
@@ -608,7 +636,7 @@ implementation{
       //dbg(APPLICATION_CHANNEL, "TCPWriteTimer Fired!...\n");
       numbersToWrite = numbersToTransfer - numbersWrittenSoFar;
       if (numbersToWrite == 0) {
-         // All numbers have been written
+         // No numbers to write
          return;
       }
       //else if (numbersToWrite > SOCKET_BUFFER_SIZE/2) {
@@ -724,8 +752,8 @@ implementation{
             }*/
          }
       }
-               if(numbersRead != 0)
-            dbg(P4_DBG_CHANNEL, "Done reading from buffer...\n");
+            //    if(numbersRead != 0)
+            // dbg(P4_DBG_CHANNEL, "Done reading from buffer...\n");
    }
 
    event void CommandHandler.setAppServer(){}
@@ -735,7 +763,7 @@ implementation{
    event error_t Transport.send(pack* package){
       //update the packet seq number
       package->seq = currentSequence + 1;
-      //dbg(P4_DBG_CHANNEL, "Sending packet from (%hhu) to (%hhu) payload: %c\n", package->src, package->dest, package->payload);
+      //dbg(P4_DBG_CHANNEL, "Sending packet from (%hhu) to (%hhu) payload: %s\n", package->src, package->dest, package->payload);
       call packetsQueue.pushback(*package);
       incrementSequence();
       return SUCCESS;
@@ -751,7 +779,9 @@ implementation{
       bool userFound = FALSE;
       socket_store_t *socketData;
       char tempMessage[SOCKET_BUFFER_SIZE];
+      char space = ' ', comma = ',', returnchr = '\r', newlinechr = '\n';
       uint32_t keys, i;
+      bool firstUser = TRUE;
       memcpy(tempMessage, fullMessageBuffer[fd], SOCKET_BUFFER_SIZE);
       //depending on message, execute the following actions
       dbg(P4_DBG_CHANNEL, "Analyzing message: %s\n", tempMessage);
@@ -853,8 +883,43 @@ implementation{
       //"msg", broadcast message to all users connected
       //"whisper", send message to specified username
       //"listusr", output all connected users
-      if(strcmp(token, "listusr") == 0){
-         
+      if(strcmp(tempMessage, "listusr\r\n") == 0){
+         dbg(P4_DBG_CHANNEL, "Found \"listusr\" from %s\n", connectedUsers[fd]);
+         // Write a reply containing the list of all connected users
+         memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
+         sprintf(messageBuff, "listUsrRply");
+         for (i = 0; i < MAX_NUM_OF_SOCKETS; i++) {
+            if (connectedUsers[i][0] != NULL) {
+               if (firstUser == FALSE) {
+                  strncat(messageBuff, &comma, 1);
+               }
+               else {
+                  firstUser = FALSE;
+               }
+               strncat(messageBuff, &space, 1);
+               strcat(messageBuff, connectedUsers[i]);
+            }
+         }
+         strncat(messageBuff, &returnchr, 1);
+         strncat(messageBuff, &newlinechr, 1);
+         dbg(P4_DBG_CHANNEL, "message: %s\n", messageBuff);
+         numbersToTransfer = strlen(messageBuff);
+         numbersWrittenSoFar = 0;
+
+         // Write the message to send buffer
+         default_socket = fd;
+         beginWrite();
+         call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER); // reset timer
+
+         // Send a packet to self to start transmission
+         socketData = call Transport.getSocketByFd(fd);
+         makeTCPPack(&TCPPackage, socketData->src.port, socketData->dest.port, 0, 0, 0, socketData->bufferSpace, "Signal", TCP_PACKET_MAX_PAYLOAD_SIZE);
+         makePack(&sendPackage, socketData->src.addr, socketData->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+         memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+         dbg(P4_DBG_CHANNEL, "Sending package to self to signal sendBuffer transmission...\n");
+         if (call Transport.receive(&sendPackage) == SUCCESS) {
+            dbg(P4_DBG_CHANNEL, "Transmission initiated!\n");
+         }
       }
       //to debug
       //keys = call userMap.getKeys();
