@@ -784,7 +784,7 @@ implementation{
          
          //modify the message
          memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
-         sprintf(messageBuff, "rcvMsg %s", temp);
+         sprintf(messageBuff, "msgFrom %s %s", connectedUsers[fd], temp);
          dbg(P4_DBG_CHANNEL, "modified message: %s\n", messageBuff);
 
          //transmit the msg to all users
@@ -813,9 +813,10 @@ implementation{
             }
          }
       }
-      else if(strcmp(token, "rcvMsg") == 0) {
+      else if(strcmp(token, "msgFrom") == 0) {
+         token = strtok(NULL, " ");
          temp = strtok(NULL, "");
-         dbg(APPLICATION_CHANNEL, "Received a message: %s", temp);
+         dbg(APPLICATION_CHANNEL, "Received a message from %s: %s", token, temp);
       }
       else if(strcmp(tempMessage, "listusr\r\n") == 0){
          dbg(P4_DBG_CHANNEL, "Found \"listusr\" from %s\n", connectedUsers[fd]);
