@@ -844,8 +844,8 @@ implementation{
             //check to see if it maches any names
             if(strcmp(temp, connectedUsers[i]) == 0){
                //temp is user
-               dbg(P4_DBG_CHANNEL,"Found a user, display msg\n");
-               dbg(APPLICATION_CHANNEL, "%s", fullMessageBuffer[i]);
+               dbg(P4_DBG_CHANNEL,"%s found a msg\n", temp);
+               dbg(APPLICATION_CHANNEL, "%s\n", fullMessageBuffer[i]);
                userFound = TRUE;
                break;
             }
@@ -855,26 +855,30 @@ implementation{
             dbg(P4_DBG_CHANNEL, "Found \"msg\" from %s\nmessage:%s\n", connectedUsers[fd], temp);
             //modify the message
             memset(messageBuff, '\0', SOCKET_BUFFER_SIZE);
-            sprintf(messageBuff, "msg %s:%s", connectedUsers[fd], temp);
+            sprintf(messageBuff, "msg %s:%s\n", connectedUsers[fd], temp);
+            dbg(P4_DBG_CHANNEL, "modified message:%s\n",messageBuff);
             //clear the old data
             memset(fullMessageBuffer[fd], '\0', SOCKET_BUFFER_SIZE);
             //transmit the msg to all users
             for(i=0;i<MAX_NUM_OF_SOCKETS; i++){
-               if(strcmp(connectedUsers[i], connectedUsers[fd]) != 0 && connectedUsers[i] != NULL){
-                  //send mesage to this socket
-                  target_fd = i;
-                  default_socket = target_fd;
-                  socketData = call Transport.getSocketByFd(target_fd);
-                  beginWrite();
-                  call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);//resert timer to write.
-                  makeTCPPack(&TCPPackage, 0, socketData->dest.port, 0, 0, 0, 5, "Sig. Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
-                  //no flags
-                  TCPPackage.flags = 0;
-                  makePack(&sendPackage, 0, socketData->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
-                  memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
-                  dbg(P4_DBG_CHANNEL, "Sending package to self to signal sendBuffer transmission...\n");
-                  if(call Transport.receive(&sendPackage) == SUCCESS){
-                     dbg(P4_DBG_CHANNEL, "Whisper: Transmission initiated to target user!\n");
+               if(connectedUsers[i][0] != NULL){
+                  if(strcmp(connectedUsers[i], connectedUsers[fd]) != 0){
+                     dbg(P4_DBG_CHANNEL, "**Sending modified message to %s over socket(%hhu)**\n\n", connectedUsers[i], i);
+                     //send mesage to this socket
+                     target_fd = i;
+                     default_socket = target_fd;
+                     socketData = call Transport.getSocketByFd(target_fd);
+                     beginWrite();
+                     call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);//resert timer to write.
+                     makeTCPPack(&TCPPackage, 0, socketData->dest.port, 0, 0, 0, 5, "Sig. Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
+                     //no flags
+                     TCPPackage.flags = 0;
+                     makePack(&sendPackage, 0, socketData->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+                     memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+                     dbg(P4_DBG_CHANNEL, "Sending package to self to signal sendBuffer transmission...\n");
+                     if(call Transport.receive(&sendPackage) == SUCCESS){
+                        dbg(P4_DBG_CHANNEL, "Whisper: Transmission initiated to target user!\n");
+                     }
                   }
                }
             }

@@ -37,8 +37,8 @@ def main():
     s.runTime(500);
     s.hello(4, "Samantha", 40);
     s.runTime(2000);
-    #s.message(3, "PENTAKILL");
-    #s.runTime(100);
+    s.message(3, "PENTAKILL");
+    s.runTime(2000);
     #python, for some stupid reason, combines the 2 strings into 1...
     #ganna use whitespace after username as delimiter
     #s.whisper(3, "Michael ", "MID MIA");
