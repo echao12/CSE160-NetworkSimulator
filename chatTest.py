@@ -29,22 +29,27 @@ def main():
     # Designate a node as the server
     s.testServer(1, 41);#mote,port
     s.runTime(100);
-    #s.runTime(1);
-    #s.testServer(1, 200);#mote,port
+    
     s.hello(2, "Michael", 20);
     s.runTime(1000);
+
     s.hello(3, "Eric", 30);
     s.runTime(2000);
-    s.hello(4, "Samantha", 40);
-    s.runTime(3000);
-    #s.message(3, "PENTAKILL");
-    #s.runTime(2000);
-    #python, for some stupid reason, combines the 2 strings into 1...
-    #ganna use whitespace after username as delimiter
+    
+    s.listusr(3);
+    s.runTime(2000);
+    
     s.whisper(3, "Michael", "MID MIA");
     s.runTime(2000);
-    #s.listusr(3);
-    #s.runTime(2000);
+    
+    s.hello(4, "Samantha", 40);
+    s.runTime(3000);
+    
+    s.listusr(3);
+    s.runTime(2000);
+    
+    s.message(3, "PENTAKILL");
+    s.runTime(2000);
 
 if __name__ == '__main__':
     main()

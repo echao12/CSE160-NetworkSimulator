@@ -731,45 +731,35 @@ implementation{
       else if(strcmp(token, "whisper") == 0){
          token = strtok(NULL, " ");//intended receivername, connectedUsers[fd] is sender name
          temp = strtok(NULL,"");//message
-         //check if we are intended user
-         if(strcmp(token, username) == 0){
-               //received whisper
-               dbg(APPLICATION_CHANNEL, "%s\n", fullMessageBuffer[fd]);
-               //clear message cuz we got what we needed.
-               memset(fullMessageBuffer[fd], '\0', SOCKET_BUFFER_SIZE);
-         }else{
-            //forward message
-            dbg(P4_DBG_CHANNEL, "Found \"whisper\" from %s to %s\nMSG:%s\n", connectedUsers[fd], token, temp);
-            //modify the message in format: whisper <sender>: <msg>
-            sprintf(messageBuff, "whisperFrom %s %s", connectedUsers[fd], temp);
-            dbg(P4_DBG_CHANNEL, "Modified message: %s\nInitiating transmission...\n", messageBuff);
-            //prepare for transmission
-            bytesToTransfer = strlen(messageBuff);
-            bytesWrittenSoFar = 0;
-            //find the socket with the intended receiver and change it to the default socket
-            for(i=0; i < MAX_NUM_OF_SOCKETS; i++){
-               if(strcmp(connectedUsers[i], token) == 0){
-                  target_fd = i;
-                  dbg(P4_DBG_CHANNEL, "%s is connected to socket[%hhu]\n", token, target_fd);
-                  break;
-               }
+         //forward message
+         dbg(P4_DBG_CHANNEL, "Found \"whisper\" from %s to %s\nMSG:%s\n", connectedUsers[fd], token, temp);
+         //modify the message in format: whisper <sender>: <msg>
+         sprintf(messageBuff, "whisperFrom %s %s", connectedUsers[fd], temp);
+         dbg(P4_DBG_CHANNEL, "Modified message: %s\nInitiating transmission...\n", messageBuff);
+         //prepare for transmission
+         bytesToTransfer = strlen(messageBuff);
+         bytesWrittenSoFar = 0;
+         //find the socket with the intended receiver and change it to the default socket
+         for(i=0; i < MAX_NUM_OF_SOCKETS; i++){
+            if(strcmp(connectedUsers[i], token) == 0){
+               target_fd = i;
+               dbg(P4_DBG_CHANNEL, "%s is connected to socket[%hhu]\n", token, target_fd);
+               break;
             }
-            default_socket = target_fd;
-            writeToSocket(default_socket);
-            call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);//resert timer to write.
-            // make an empty packet to signal Transport layer to begin sending
-            // packet will determine where to send the message.
-            // destination is target_fd's src
-            socketData = call Transport.getSocketByFd(target_fd);
-            makeTCPPack(&TCPPackage, 0, socketData->dest.port, 0, 0, 0, 5, "Sig. Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
-            //no flags
-            TCPPackage.flags = 0;
-            makePack(&sendPackage, 0, socketData->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
-            memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
-            dbg(P4_DBG_CHANNEL, "Sending package to self to signal sendBuffer transmission...\n");
-            if(call Transport.receive(&sendPackage) == SUCCESS){
-               dbg(P4_DBG_CHANNEL, "Whisper: Transmission initiated to target user!\n");
-            }
+         }
+         default_socket = target_fd;
+         writeToSocket(default_socket);
+         call TCPWriteTimer.startPeriodic(TCP_WRITE_TIMER);//resert timer to write.
+         // make an empty packet to signal Transport layer to begin sending
+         // packet will determine where to send the message.
+         // destination is target_fd's src
+         socketData = call Transport.getSocketByFd(target_fd);
+         makeTCPPack(&TCPPackage, 0, socketData->dest.port, 0, 0, 0, 5, "Sig. Transmit", TCP_PACKET_MAX_PAYLOAD_SIZE);
+         makePack(&sendPackage, 0, socketData->dest.addr, MAX_TTL, PROTOCOL_TCP, 0, "", PACKET_MAX_PAYLOAD_SIZE);
+         memcpy(&sendPackage.payload, &TCPPackage, PACKET_MAX_PAYLOAD_SIZE);
+         dbg(P4_DBG_CHANNEL, "Sending package to self to signal sendBuffer transmission...\n");
+         if(call Transport.receive(&sendPackage) == SUCCESS){
+            dbg(P4_DBG_CHANNEL, "Whisper: Transmission initiated to target user!\n");
          }
       }
       else if(strcmp(token, "whisperFrom") == 0) {
@@ -863,6 +853,10 @@ implementation{
             dbg(P4_DBG_CHANNEL, "Transmission initiated!\n");
          }
       }
+
+      // clear message buffer
+      memset(fullMessageBuffer[fd], '\0', SOCKET_BUFFER_SIZE);
+
       //to debug
       //keys = call userMap.getKeys();
       dbg(P4_DBG_CHANNEL, "\n\n**CURRENT CONNECTED USERS:**\n");
